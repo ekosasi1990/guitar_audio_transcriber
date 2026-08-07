@@ -55,9 +55,13 @@ npm start
 
 ## Usage
 
-1. Launch the backend server (`uvicorn src.backend.api:app`).
-2. Launch the Electron app (`npm start` from `src/frontend`).
-3. Import an MP3 or WAV guitar recording.
+1. Launch the backend server (`uvicorn src.backend.api:app` or the `start.bat` helper).
+2. Launch the Electron app (`npm start` or the installed `.exe`).
+3. Import an MP3 / WAV file or record guitar directly with your microphone.
+
+## Building a Windows Installer
+
+Run `build-frontend.bat` after setting up dependencies. It uses `electron-builder` to produce a `.exe` installer in the `dist/` folder. The Python backend still needs to run separately (use `start.bat` or `python -m uvicorn src.backend.api:app`).
 4. Review the detected notes in the multitrack editor.
 5. Edit pitch, timing, duration, or instrument assignments.
 6. Add accompaniment tracks if desired.

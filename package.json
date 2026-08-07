@@ -5,8 +5,29 @@
   "main": "src/frontend/main.js",
   "scripts": {
     "start": "electron src/frontend/main.js",
+    "build": "electron-builder --win",
+    "dist": "electron-builder --win",
     "test": "python -m pytest tests",
     "dev:backend": "python -m uvicorn src.backend.api:app --reload"
+  },
+  "build": {
+    "appId": "com.guitaraudio.transcriber",
+    "productName": "Guitar Audio Transcriber",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/frontend/**/*",
+      "!node_modules",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "repository": {
     "type": "git",
@@ -23,6 +44,7 @@
   "author": "Luke Tan",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^28.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.3"
   }
 }
