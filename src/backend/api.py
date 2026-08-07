@@ -1,0 +1,191 @@
+import os
+import uuid
+import shutil
+import tempfile
+from typing import Dict, List
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from .audio_processing import (
+    load_audio,
+    detect_onsets,
+    detect_pitches,
+    estimate_tempo,
+    quantize_notes,
+    export_midi,
+)
+from .editor import Track, generate_accompaniment
+from .sheet_music import notes_to_musicxml, notes_to_tab
+from .playback import render_synced_audio
+
+app = FastAPI(title="Guitar Audio Transcriber API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+UPLOAD_DIR = tempfile.mkdtemp(prefix="gat_uploads_")
+OUTPUT_DIR = os.path.join(UPLOAD_DIR, "exports")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# In-memory project store
+PROJECTS: Dict[str, dict] = {}
+
+
+class NoteEdit(BaseModel):
+    track: str
+    old_pitch: int
+    old_start: float
+    new_pitch: int
+    new_start: float
+    new_end: float
+    new_velocity: int
+
+
+class AccompanimentRequest(BaseModel):
+    chords: List[List]  # [ [beat, "C"], ... ]
+
+
+@app.post("/upload")
+async def upload_audio(file: UploadFile = File(...)):
+    project_id = str(uuid.uuid4())
+    project_dir = os.path.join(UPLOAD_DIR, project_id)
+    os.makedirs(project_dir, exist_ok=True)
+    file_path = os.path.join(project_dir, file.filename)
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    y, sr = load_audio(file_path)
+    PROJECTS[project_id] = {
+        "id": project_id,
+        "audio_path": file_path,
+        "y": y,
+        "sr": sr,
+        "bpm": 120.0,
+        "tracks": {},
+        "accompaniment": None,
+    }
+    return {"project_id": project_id, "duration": len(y) / sr}
+
+
+@app.post("/transcribe/{project_id}")
+async def transcribe(project_id: str, quantize: bool = True, q_strength: float = 1.0):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    project = PROJECTS[project_id]
+    y, sr = project["y"], project["sr"]
+
+    bpm, _ = estimate_tempo(y, sr)
+    onsets, offsets = detect_onsets(y, sr)
+    raw_notes = detect_pitches(y, sr, onsets, offsets)
+
+    # Flatten polyphonic groups to individual notes
+    flat_notes = []
+    for group in raw_notes:
+        for pitch in group["pitches"]:
+            flat_notes.append({
+                "pitch": pitch,
+                "start": group["start"],
+                "end": group["end"],
+                "velocity": 80,
+            })
+
+    if quantize:
+        flat_notes = quantize_notes(flat_notes, bpm, strength=q_strength)
+
+    guitar = Track("Guitar", instrument=25)  # Acoustic Guitar (steel)
+    for n in flat_notes:
+        guitar.notes.append(n)
+
+    project["bpm"] = bpm
+    project["tracks"]["Guitar"] = flat_notes
+
+    return {
+        "project_id": project_id,
+        "bpm": bpm,
+        "tracks": {name: [n for n in track] for name, track in [("Guitar", flat_notes)]},
+    }
+
+
+@app.get("/tracks/{project_id}")
+async def get_tracks(project_id: str):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    return {
+        "bpm": PROJECTS[project_id]["bpm"],
+        "tracks": PROJECTS[project_id]["tracks"],
+    }
+
+
+@app.post("/edit/{project_id}")
+async def edit_note(project_id: str, edit: NoteEdit):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    tracks = PROJECTS[project_id]["tracks"]
+    if edit.track not in tracks:
+        return {"error": "Track not found"}, 404
+
+    for n in tracks[edit.track]:
+        if n["pitch"] == edit.old_pitch and abs(n["start"] - edit.old_start) < 0.001:
+            n["pitch"] = edit.new_pitch
+            n["start"] = edit.new_start
+            n["end"] = edit.new_end
+            n["velocity"] = edit.new_velocity
+            break
+    return {"status": "updated", "tracks": tracks}
+
+
+@app.post("/accompaniment/{project_id}")
+async def add_accompaniment(project_id: str, req: AccompanimentRequest):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    bpm = PROJECTS[project_id]["bpm"]
+    duration = len(PROJECTS[project_id]["y"]) / PROJECTS[project_id]["sr"]
+    accompaniment = generate_accompaniment(req.chords, bpm, duration)
+    PROJECTS[project_id]["accompaniment"] = accompaniment
+    PROJECTS[project_id]["tracks"].update(accompaniment)
+    return {"status": "ok", "tracks": PROJECTS[project_id]["tracks"]}
+
+
+@app.post("/export/{project_id}")
+async def export_midi_endpoint(project_id: str, filename: str = "export.mid"):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    project = PROJECTS[project_id]
+    output_path = os.path.join(OUTPUT_DIR, f"{project_id}_{filename}")
+    instruments = {"Guitar": 25}
+    export_midi(project["tracks"], project["bpm"], instruments, output_path)
+    return {"midi_path": output_path}
+
+
+@app.get("/sheet/{project_id}")
+async def generate_sheet(project_id: str, format: str = "musicxml"):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    project = PROJECTS[project_id]
+    if format == "musicxml":
+        path = os.path.join(OUTPUT_DIR, f"{project_id}_sheet.xml")
+        notes_to_musicxml(project["tracks"], project["bpm"], path)
+    else:
+        path = os.path.join(OUTPUT_DIR, f"{project_id}_tab.xml")
+        guitar_notes = project["tracks"].get("Guitar", [])
+        notes_to_tab(guitar_notes, project["bpm"], path)
+    return {"sheet_path": path}
+
+
+@app.post("/playback/{project_id}")
+async def generate_playback(project_id: str, mix_ratio: float = 0.4):
+    if project_id not in PROJECTS:
+        return {"error": "Project not found"}, 404
+    project = PROJECTS[project_id]
+    midi_path = os.path.join(OUTPUT_DIR, f"{project_id}_playback.mid")
+    instruments = {"Guitar": 25}
+    export_midi(project["tracks"], project["bpm"], instruments, midi_path)
+    output_path = os.path.join(OUTPUT_DIR, f"{project_id}_mixed.wav")
+    render_synced_audio(project["audio_path"], midi_path, output_path, mix_ratio)
+    return {"audio_path": output_path}

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guitar Audio Transcriber</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Guitar Audio Transcriber</h1>
+    <p>Convert MP3 / WAV guitar recordings into editable MIDI, sheet music, and tablature.</p>
+  </header>
+
+  <main>
+    <section id="upload-section">
+      <input type="file" id="audioInput" accept=".mp3,.wav" />
+      <button id="uploadBtn">Upload</button>
+      <button id="transcribeBtn" disabled>Transcribe</button>
+    </section>
+
+    <section id="info-section" class="hidden">
+      <p>Project: <span id="projectId"></span></p>
+      <p>BPM: <span id="bpmDisplay"></span></p>
+    </section>
+
+    <section id="editor-section" class="hidden">
+      <h2>Multitrack Editor</h2>
+      <div id="trackList"></div>
+      <canvas id="pianoRoll" width="1200" height="400"></canvas>
+
+      <div id="editControls">
+        <h3>Edit Selected Note</h3>
+        <label>Pitch: <input type="number" id="editPitch" min="0" max="127" /></label>
+        <label>Start: <input type="number" id="editStart" step="0.01" /></label>
+        <label>End: <input type="number" id="editEnd" step="0.01" /></label>
+        <label>Velocity: <input type="number" id="editVelocity" min="0" max="127" /></label>
+        <button id="updateNoteBtn">Update Note</button>
+      </div>
+
+      <div id="accompanimentControls">
+        <h3>Accompaniment</h3>
+        <textarea id="chordsInput" rows="4" cols="40">[[0, "C"], [4, "G"], [8, "Am"], [12, "F"]]</textarea>
+        <button id="addAccompanimentBtn">Add Accompaniment</button>
+      </div>
+
+      <div id="exportControls">
+        <button id="exportMidiBtn">Export MIDI</button>
+        <button id="exportSheetBtn">Export Sheet Music</button>
+        <button id="exportTabBtn">Export Tablature</button>
+        <button id="playbackBtn">Generate Playback Mix</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
