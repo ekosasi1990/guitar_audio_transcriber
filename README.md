@@ -55,17 +55,24 @@ npm start
 
 ## Usage
 
-1. Launch the backend server (`uvicorn src.backend.api:app` or the `start.bat` helper).
-2. Launch the Electron app (`npm start` or the installed `.exe`).
-3. Import an MP3 / WAV file or record guitar directly with your microphone.
+1. Launch the app (`start.bat` or the installed `.exe` installer).
+2. Import an MP3 / WAV file or record guitar directly with your microphone.
+3. Click **Transcribe** to detect notes.
+4. Review and edit detected notes in the multitrack editor.
+5. Add accompaniment tracks if desired.
+6. Export the result to MIDI or view sheet music / tablature.
 
 ## Building a Windows Installer
 
-Run `build-frontend.bat` after setting up dependencies. It uses `electron-builder` to produce a `.exe` installer in the `dist/` folder. The Python backend still needs to run separately (use `start.bat` or `python -m uvicorn src.backend.api:app`).
-4. Review the detected notes in the multitrack editor.
-5. Edit pitch, timing, duration, or instrument assignments.
-6. Add accompaniment tracks if desired.
-7. Export the result to MIDI or view sheet music / tablature.
+To create a single `.exe` installer that bundles both the Python backend and the Electron frontend:
+
+```cmd
+build-all.bat
+```
+
+This produces a `dist/Guitar Audio Transcriber Setup.exe` installer. The installer includes a `dist-backend/gat-backend/gat-backend.exe` which the frontend launches automatically on startup.
+
+Because the backend includes audio / ML libraries, the installed app will be several hundred MB. The build excludes unused GUI toolkits (`tkinter`, `PyQt*`, `PySide*`, `wx`) to keep it as small as possible.
 
 ## License
 

@@ -24,6 +24,9 @@
     "win": {
       "target": "nsis"
     },
+    "extraResources": [
+      "dist-backend/**/*"
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
