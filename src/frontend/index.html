@@ -16,7 +16,10 @@
     <section id="upload-section">
       <input type="file" id="audioInput" accept=".mp3,.wav" />
       <button id="uploadBtn">Upload</button>
+      <button id="recordBtn">Record</button>
+      <button id="stopRecordBtn" disabled>Stop Recording</button>
       <button id="transcribeBtn" disabled>Transcribe</button>
+      <audio id="recordedAudio" controls class="hidden"></audio>
     </section>
 
     <section id="info-section" class="hidden">
@@ -53,6 +56,7 @@
     </section>
   </main>
 
+  <script src="js/recorder.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

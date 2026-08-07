@@ -8,16 +8,23 @@ let selectedTrack = null;
 
 const uploadInput = document.getElementById('audioInput');
 const uploadBtn = document.getElementById('uploadBtn');
+const recordBtn = document.getElementById('recordBtn');
+const stopRecordBtn = document.getElementById('stopRecordBtn');
 const transcribeBtn = document.getElementById('transcribeBtn');
 const editorSection = document.getElementById('editor-section');
 const infoSection = document.getElementById('info-section');
 const projectIdSpan = document.getElementById('projectId');
 const bpmDisplay = document.getElementById('bpmDisplay');
 const trackList = document.getElementById('trackList');
+const recordedAudio = document.getElementById('recordedAudio');
 const canvas = document.getElementById('pianoRoll');
 const ctx = canvas.getContext('2d');
 
+const recorder = new MicRecorder();
+
 uploadBtn.addEventListener('click', uploadAudio);
+recordBtn.addEventListener('click', startRecording);
+stopRecordBtn.addEventListener('click', stopRecording);
 transcribeBtn.addEventListener('click', transcribeAudio);
 document.getElementById('updateNoteBtn').addEventListener('click', updateNote);
 document.getElementById('addAccompanimentBtn').addEventListener('click', addAccompaniment);
@@ -26,11 +33,9 @@ document.getElementById('exportSheetBtn').addEventListener('click', () => export
 document.getElementById('exportTabBtn').addEventListener('click', () => exportSheet('tab'));
 document.getElementById('playbackBtn').addEventListener('click', generatePlayback);
 
-async function uploadAudio() {
-  const file = uploadInput.files[0];
-  if (!file) return;
+async function uploadFile(file, filename) {
   const form = new FormData();
-  form.append('file', file);
+  form.append('file', file, filename);
 
   const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: form });
   const data = await res.json();
@@ -38,6 +43,35 @@ async function uploadAudio() {
   projectIdSpan.textContent = projectId;
   infoSection.classList.remove('hidden');
   transcribeBtn.disabled = false;
+}
+
+async function uploadAudio() {
+  const file = uploadInput.files[0];
+  if (!file) return;
+  await uploadFile(file, file.name);
+}
+
+async function startRecording() {
+  try {
+    await recorder.start();
+    recordBtn.disabled = true;
+    stopRecordBtn.disabled = false;
+    recordedAudio.classList.add('hidden');
+  } catch (err) {
+    alert('Could not start microphone: ' + err.message);
+  }
+}
+
+async function stopRecording() {
+  const wavBlob = recorder.stop();
+  recordBtn.disabled = false;
+  stopRecordBtn.disabled = true;
+
+  const url = URL.createObjectURL(wavBlob);
+  recordedAudio.src = url;
+  recordedAudio.classList.remove('hidden');
+
+  await uploadFile(wavBlob, 'recording.wav');
 }
 
 async function transcribeAudio() {
