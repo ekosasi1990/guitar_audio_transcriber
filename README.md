@@ -19,20 +19,37 @@ A desktop application that converts MP3 and WAV guitar recordings into editable 
 
 ## Getting Started
 
-### Backend
+### One-time setup (Windows)
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # on Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+Double-click `setup.bat` or run in Command Prompt:
+
+```cmd
+setup.bat
+```
+
+This installs Python and Node dependencies.
+
+### Launch the app (Windows)
+
+Double-click `start.bat` or run in Command Prompt:
+
+```cmd
+start.bat
+```
+
+This opens two windows: the FastAPI backend and the Electron frontend.
+
+### Manual start
+
+If you prefer to start manually:
+
+```cmd
 python -m uvicorn src.backend.api:app --reload
 ```
 
-### Frontend
+And in another Command Prompt:
 
-```bash
-cd src/frontend
-npm install
+```cmd
 npm start
 ```
 
