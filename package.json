@@ -4,7 +4,7 @@
   "description": "Desktop audio transcriber that converts guitar recordings into editable MIDI, sheet music, and tablature.",
   "main": "src/frontend/main.js",
   "scripts": {
-    "start": "cd src/frontend && npm start",
+    "start": "electron src/frontend/main.js",
     "test": "python -m pytest tests",
     "dev:backend": "python -m uvicorn src.backend.api:app --reload"
   },
@@ -12,7 +12,17 @@
     "type": "git",
     "url": "https://github.com/ekosasi1990/guitar_audio_transcriber.git"
   },
-  "keywords": ["audio", "transcription", "guitar", "midi", "polyphonic", "electron"],
+  "keywords": [
+    "audio",
+    "transcription",
+    "guitar",
+    "midi",
+    "polyphonic",
+    "electron"
+  ],
   "author": "Luke Tan",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
 }

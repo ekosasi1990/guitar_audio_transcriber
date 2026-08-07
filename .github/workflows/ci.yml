@@ -29,8 +29,6 @@ jobs:
         with:
           node-version: '20'
       - name: Install dependencies
-        working-directory: src/frontend
         run: npm install
-      - name: Build check
-        working-directory: src/frontend
-        run: npm run build || true
+      - name: Electron smoke check
+        run: npx electron --version
