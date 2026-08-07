@@ -2,11 +2,13 @@ class MicRecorder {
   constructor() {
     this.audioCtx = null;
     this.source = null;
+    this.analyser = null;
     this.processor = null;
     this.stream = null;
     this.chunks = [];
     this.sampleRate = 44100;
     this.isRecording = false;
+    this.startTime = 0;
   }
 
   async start() {
@@ -14,6 +16,8 @@ class MicRecorder {
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: this.sampleRate });
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.source = this.audioCtx.createMediaStreamSource(this.stream);
+    this.analyser = this.audioCtx.createAnalyser();
+    this.analyser.fftSize = 256;
     this.processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
 
     this.processor.onaudioprocess = (event) => {
@@ -21,9 +25,24 @@ class MicRecorder {
       this.chunks.push(new Float32Array(data));
     };
 
-    this.source.connect(this.processor);
+    this.source.connect(this.analyser);
+    this.analyser.connect(this.processor);
     this.processor.connect(this.audioCtx.destination);
     this.isRecording = true;
+    this.startTime = Date.now();
+  }
+
+  getLevel() {
+    if (!this.analyser) return 0;
+    const data = new Uint8Array(this.analyser.frequencyBinCount);
+    this.analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    return sum / data.length / 255;
+  }
+
+  getDuration() {
+    return (Date.now() - this.startTime) / 1000;
   }
 
   stop() {

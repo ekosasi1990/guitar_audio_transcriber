@@ -18,7 +18,10 @@
       <button id="uploadBtn">Upload</button>
       <button id="recordBtn">Record</button>
       <button id="stopRecordBtn" disabled>Stop Recording</button>
+      <span id="recordTimer" class="hidden">0.0s</span>
       <button id="transcribeBtn" disabled>Transcribe</button>
+      <p id="statusMsg" class="status">Ready</p>
+      <canvas id="levelMeter" width="300" height="20" class="hidden"></canvas>
       <audio id="recordedAudio" controls class="hidden"></audio>
     </section>
 
@@ -52,6 +55,11 @@
         <button id="exportSheetBtn">Export Sheet Music</button>
         <button id="exportTabBtn">Export Tablature</button>
         <button id="playbackBtn">Generate Playback Mix</button>
+      </div>
+
+      <div id="playbackSection" class="hidden">
+        <h3>Playback</h3>
+        <audio id="mixAudio" controls></audio>
       </div>
     </section>
   </main>

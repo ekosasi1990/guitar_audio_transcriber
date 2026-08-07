@@ -66,3 +66,30 @@ input, textarea {
 #trackList {
   margin-bottom: 0.5rem;
 }
+
+.status {
+  color: #00d4ff;
+  font-style: italic;
+  margin: 0.5rem 0;
+}
+
+#recordTimer {
+  color: #ff6b6b;
+  font-weight: bold;
+  margin-left: 0.5rem;
+}
+
+#levelMeter {
+  background: #111;
+  border: 1px solid #444;
+  display: block;
+  margin-top: 0.5rem;
+}
+
+#playbackSection {
+  margin-top: 1rem;
+}
+
+#mixAudio {
+  width: 100%;
+}

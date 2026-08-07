@@ -17,10 +17,22 @@ const projectIdSpan = document.getElementById('projectId');
 const bpmDisplay = document.getElementById('bpmDisplay');
 const trackList = document.getElementById('trackList');
 const recordedAudio = document.getElementById('recordedAudio');
+const levelMeter = document.getElementById('levelMeter');
+const levelCtx = levelMeter.getContext('2d');
+const recordTimer = document.getElementById('recordTimer');
+const statusMsg = document.getElementById('statusMsg');
+const mixAudio = document.getElementById('mixAudio');
+const playbackSection = document.getElementById('playbackSection');
 const canvas = document.getElementById('pianoRoll');
 const ctx = canvas.getContext('2d');
 
 const recorder = new MicRecorder();
+let meterInterval = null;
+let timerInterval = null;
+
+function setStatus(text) {
+  statusMsg.textContent = text;
+}
 
 uploadBtn.addEventListener('click', uploadAudio);
 recordBtn.addEventListener('click', startRecording);
@@ -34,6 +46,7 @@ document.getElementById('exportTabBtn').addEventListener('click', () => exportSh
 document.getElementById('playbackBtn').addEventListener('click', generatePlayback);
 
 async function uploadFile(file, filename) {
+  setStatus('Uploading audio...');
   const form = new FormData();
   form.append('file', file, filename);
 
@@ -43,6 +56,7 @@ async function uploadFile(file, filename) {
   projectIdSpan.textContent = projectId;
   infoSection.classList.remove('hidden');
   transcribeBtn.disabled = false;
+  setStatus(`Audio loaded. Duration: ${data.duration.toFixed(2)}s. Click Transcribe.`);
 }
 
 async function uploadAudio() {
@@ -51,14 +65,31 @@ async function uploadAudio() {
   await uploadFile(file, file.name);
 }
 
+function drawLevelMeter() {
+  const level = recorder.getLevel();
+  levelCtx.clearRect(0, 0, levelMeter.width, levelMeter.height);
+  levelCtx.fillStyle = '#00d4ff';
+  levelCtx.fillRect(0, 0, levelMeter.width * level, levelMeter.height);
+}
+
+function updateRecordTimer() {
+  recordTimer.textContent = recorder.getDuration().toFixed(1) + 's';
+}
+
 async function startRecording() {
   try {
     await recorder.start();
     recordBtn.disabled = true;
     stopRecordBtn.disabled = false;
     recordedAudio.classList.add('hidden');
+    levelMeter.classList.remove('hidden');
+    recordTimer.classList.remove('hidden');
+    setStatus('Recording... play your guitar');
+    meterInterval = setInterval(drawLevelMeter, 50);
+    timerInterval = setInterval(updateRecordTimer, 100);
   } catch (err) {
     alert('Could not start microphone: ' + err.message);
+    setStatus('Microphone access denied or unavailable');
   }
 }
 
@@ -66,23 +97,30 @@ async function stopRecording() {
   const wavBlob = recorder.stop();
   recordBtn.disabled = false;
   stopRecordBtn.disabled = true;
+  clearInterval(meterInterval);
+  clearInterval(timerInterval);
+  levelMeter.classList.add('hidden');
 
   const url = URL.createObjectURL(wavBlob);
   recordedAudio.src = url;
   recordedAudio.classList.remove('hidden');
 
+  setStatus('Processing recording...');
   await uploadFile(wavBlob, 'recording.wav');
 }
 
 async function transcribeAudio() {
+  setStatus('Transcribing... please wait');
   const res = await fetch(`${API_URL}/transcribe/${projectId}`, { method: 'POST' });
   const data = await res.json();
   bpm = data.bpm;
   tracks = data.tracks;
   bpmDisplay.textContent = bpm;
   editorSection.classList.remove('hidden');
+  playbackSection.classList.remove('hidden');
   renderTrackList();
   drawPianoRoll();
+  setStatus(`Transcribed ${Object.values(tracks).flat().length} notes. Select a track to edit.`);
 }
 
 async function fetchTracks() {
@@ -192,19 +230,28 @@ async function addAccompaniment() {
 }
 
 async function exportMIDI() {
+  setStatus('Exporting MIDI...');
   const res = await fetch(`${API_URL}/export/${projectId}`, { method: 'POST' });
   const data = await res.json();
-  alert(`MIDI exported to: ${data.midi_path}`);
+  setStatus(`MIDI saved: ${data.midi_path}`);
 }
 
 async function exportSheet(format) {
+  setStatus('Exporting notation...');
   const res = await fetch(`${API_URL}/sheet/${projectId}?format=${format}`);
   const data = await res.json();
-  alert(`${format === 'tab' ? 'Tablature' : 'Sheet music'} exported to: ${data.sheet_path}`);
+  setStatus(`${format === 'tab' ? 'Tablature' : 'Sheet music'} saved: ${data.sheet_path}`);
 }
 
 async function generatePlayback() {
+  setStatus('Generating playback mix...');
   const res = await fetch(`${API_URL}/playback/${projectId}`, { method: 'POST' });
-  const data = await res.json();
-  alert(`Playback mix exported to: ${data.audio_path}`);
+  if (!res.ok) {
+    setStatus('Playback mix failed.');
+    return;
+  }
+  const blob = await res.blob();
+  mixAudio.src = URL.createObjectURL(blob);
+  playbackSection.classList.remove('hidden');
+  setStatus('Playback mix ready. Press play below to listen.');
 }

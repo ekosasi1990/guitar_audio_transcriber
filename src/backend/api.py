@@ -4,6 +4,7 @@ import shutil
 import tempfile
 from typing import Dict, List
 from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -188,4 +189,4 @@ async def generate_playback(project_id: str, mix_ratio: float = 0.4):
     export_midi(project["tracks"], project["bpm"], instruments, midi_path)
     output_path = os.path.join(OUTPUT_DIR, f"{project_id}_mixed.wav")
     render_synced_audio(project["audio_path"], midi_path, output_path, mix_ratio)
-    return {"audio_path": output_path}
+    return FileResponse(output_path, media_type="audio/wav", filename="playback.wav")
