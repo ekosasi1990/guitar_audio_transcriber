@@ -3,7 +3,7 @@ import uuid
 import shutil
 import tempfile
 from typing import Dict, List
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,7 +16,7 @@ from .audio_processing import (
     quantize_notes,
     export_midi,
 )
-from .editor import Track, generate_accompaniment
+from .editor import generate_accompaniment
 from .sheet_music import notes_to_musicxml, notes_to_tab
 from .playback import render_synced_audio
 
@@ -57,7 +57,8 @@ async def upload_audio(file: UploadFile = File(...)):
     project_id = str(uuid.uuid4())
     project_dir = os.path.join(UPLOAD_DIR, project_id)
     os.makedirs(project_dir, exist_ok=True)
-    file_path = os.path.join(project_dir, file.filename)
+    filename = os.path.basename(file.filename or "audio.wav")
+    file_path = os.path.join(project_dir, filename)
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
@@ -77,7 +78,7 @@ async def upload_audio(file: UploadFile = File(...)):
 @app.post("/transcribe/{project_id}")
 async def transcribe(project_id: str, quantize: bool = True, q_strength: float = 1.0):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     project = PROJECTS[project_id]
     y, sr = project["y"], project["sr"]
 
@@ -99,24 +100,20 @@ async def transcribe(project_id: str, quantize: bool = True, q_strength: float =
     if quantize:
         flat_notes = quantize_notes(flat_notes, bpm, strength=q_strength)
 
-    guitar = Track("Guitar", instrument=25)  # Acoustic Guitar (steel)
-    for n in flat_notes:
-        guitar.notes.append(n)
-
     project["bpm"] = bpm
     project["tracks"]["Guitar"] = flat_notes
 
     return {
         "project_id": project_id,
         "bpm": bpm,
-        "tracks": {name: [n for n in track] for name, track in [("Guitar", flat_notes)]},
+        "tracks": {"Guitar": flat_notes},
     }
 
 
 @app.get("/tracks/{project_id}")
 async def get_tracks(project_id: str):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     return {
         "bpm": PROJECTS[project_id]["bpm"],
         "tracks": PROJECTS[project_id]["tracks"],
@@ -126,10 +123,10 @@ async def get_tracks(project_id: str):
 @app.post("/edit/{project_id}")
 async def edit_note(project_id: str, edit: NoteEdit):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     tracks = PROJECTS[project_id]["tracks"]
     if edit.track not in tracks:
-        return {"error": "Track not found"}, 404
+        raise HTTPException(status_code=404, detail="Track not found")
 
     for n in tracks[edit.track]:
         if n["pitch"] == edit.old_pitch and abs(n["start"] - edit.old_start) < 0.001:
@@ -144,7 +141,7 @@ async def edit_note(project_id: str, edit: NoteEdit):
 @app.post("/accompaniment/{project_id}")
 async def add_accompaniment(project_id: str, req: AccompanimentRequest):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     bpm = PROJECTS[project_id]["bpm"]
     duration = len(PROJECTS[project_id]["y"]) / PROJECTS[project_id]["sr"]
     accompaniment = generate_accompaniment(req.chords, bpm, duration)
@@ -156,18 +153,19 @@ async def add_accompaniment(project_id: str, req: AccompanimentRequest):
 @app.post("/export/{project_id}")
 async def export_midi_endpoint(project_id: str, filename: str = "export.mid"):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     project = PROJECTS[project_id]
-    output_path = os.path.join(OUTPUT_DIR, f"{project_id}_{filename}")
+    safe_name = os.path.basename(filename)
+    output_path = os.path.join(OUTPUT_DIR, f"{project_id}_{safe_name}")
     instruments = {"Guitar": 25}
     export_midi(project["tracks"], project["bpm"], instruments, output_path)
-    return {"midi_path": output_path}
+    return FileResponse(output_path, media_type="audio/midi", filename=safe_name)
 
 
 @app.get("/sheet/{project_id}")
 async def generate_sheet(project_id: str, format: str = "musicxml"):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     project = PROJECTS[project_id]
     if format == "musicxml":
         path = os.path.join(OUTPUT_DIR, f"{project_id}_sheet.xml")
@@ -182,7 +180,7 @@ async def generate_sheet(project_id: str, format: str = "musicxml"):
 @app.post("/playback/{project_id}")
 async def generate_playback(project_id: str, mix_ratio: float = 0.4):
     if project_id not in PROJECTS:
-        return {"error": "Project not found"}, 404
+        raise HTTPException(status_code=404, detail="Project not found")
     project = PROJECTS[project_id]
     midi_path = os.path.join(OUTPUT_DIR, f"{project_id}_playback.mid")
     instruments = {"Guitar": 25}

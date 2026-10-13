@@ -35,7 +35,8 @@ def notes_to_musicxml(tracks, bpm, output_path):
             ET.SubElement(note_el, "pitch")
             ET.SubElement(note_el.find("pitch"), "step").text = midi_step(n["pitch"])
             ET.SubElement(note_el.find("pitch"), "octave").text = str(n["pitch"] // 12 - 1)
-            ET.SubElement(note_el, "duration").text = str(max(1, int(round((n["end"] - n["start"]) * 4))))
+            quarter_lengths = (n["end"] - n["start"]) * bpm / 60.0
+            ET.SubElement(note_el, "duration").text = str(max(1, int(round(quarter_lengths * 4))))
             ET.SubElement(note_el, "type").text = "quarter"
             ET.SubElement(note_el, "voice").text = "1"
 

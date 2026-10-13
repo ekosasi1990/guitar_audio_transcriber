@@ -8,15 +8,17 @@ def chord_to_midi(chord_name):
         "E": 52, "F": 53, "F#": 54, "Gb": 54, "G": 55, "G#": 56,
         "Ab": 56, "A": 57, "A#": 58, "Bb": 58, "B": 59,
     }
-    root = chord_name[0]
-    quality = chord_name[1:]
+    if len(chord_name) > 1 and chord_name[1] in ("#", "b"):
+        root, quality = chord_name[:2], chord_name[2:]
+    else:
+        root, quality = chord_name[:1], chord_name[1:]
     root_pitch = base.get(root, 48)
-    if "m" in quality:
-        intervals = [0, 3, 7]
+    if "maj7" in quality:
+        intervals = [0, 4, 7, 11]
+    elif "m" in quality:
+        intervals = [0, 3, 7] + ([10] if "7" in quality else [])
     elif "7" in quality:
         intervals = [0, 4, 7, 10]
-    elif "maj7" in quality:
-        intervals = [0, 4, 7, 11]
     else:
         intervals = [0, 4, 7]
     return [root_pitch + i for i in intervals]

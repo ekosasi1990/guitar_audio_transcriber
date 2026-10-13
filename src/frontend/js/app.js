@@ -119,6 +119,9 @@ async function transcribeAudio() {
   editorSection.classList.remove('hidden');
   playbackSection.classList.remove('hidden');
   renderTrackList();
+  if (!selectedTrack || !tracks[selectedTrack]) {
+    selectedTrack = Object.keys(tracks)[0] || null;
+  }
   drawPianoRoll();
   setStatus(`Transcribed ${Object.values(tracks).flat().length} notes. Select a track to edit.`);
 }
@@ -174,6 +177,7 @@ function drawPianoRoll() {
 }
 
 canvas.addEventListener('click', (e) => {
+  if (!selectedTrack || !tracks[selectedTrack]) return;
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (canvas.width / rect.width);
   const y = (e.clientY - rect.top) * (canvas.height / rect.height);
@@ -232,8 +236,18 @@ async function addAccompaniment() {
 async function exportMIDI() {
   setStatus('Exporting MIDI...');
   const res = await fetch(`${API_URL}/export/${projectId}`, { method: 'POST' });
-  const data = await res.json();
-  setStatus(`MIDI saved: ${data.midi_path}`);
+  if (!res.ok) {
+    setStatus('MIDI export failed.');
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'export.mid';
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus('MIDI exported.');
 }
 
 async function exportSheet(format) {

@@ -27,7 +27,20 @@ Double-click `setup.bat` or run in Command Prompt:
 setup.bat
 ```
 
-This installs Python and Node dependencies.
+This installs Python and Node dependencies. To install into a virtual
+environment instead of the system Python:
+
+```cmd
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+npm install
+```
+
+> **Python 3.13+ note:** `pydub` (used only for MP3 import) relies on the
+> `audioop` stdlib module that was removed in Python 3.13. The `audioop-lts`
+> backport is installed automatically via `requirements.txt`. MP3 decoding
+> additionally requires `ffmpeg` on PATH; WAV files need neither.
 
 ### Launch the app (Windows)
 
@@ -47,10 +60,31 @@ If you prefer to start manually:
 python -m uvicorn src.backend.api:app --reload
 ```
 
+(or, inside the venv: `.venv\Scripts\python -m uvicorn src.backend.api:app`)
+
 And in another Command Prompt:
 
 ```cmd
 npm start
+```
+
+The interactive API docs are available at `http://127.0.0.1:8000/docs`.
+
+## Running the tests
+
+```cmd
+python -m pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+Tests use deterministic synthetic WAV fixtures (pure tones with known pitches
+and onsets). Functional tests live in `test_api.py`, `test_audio_processing.py`,
+and `test_midi_export.py`. `test_accuracy.py` is marked `accuracy` and is a
+loose regression benchmark, not a correctness gate:
+
+```cmd
+python -m pytest tests -m accuracy   # benchmark only
+python -m pytest tests -m "not accuracy"  # functional tests only
 ```
 
 ## Usage
@@ -61,6 +95,29 @@ npm start
 4. Review and edit detected notes in the multitrack editor.
 5. Add accompaniment tracks if desired.
 6. Export the result to MIDI or view sheet music / tablature.
+
+## Known limitations
+
+- **Transcription quality is basic.** The pipeline (onset detection +
+  `librosa.piptrack` per segment) works on clean monophonic/simple polyphonic
+  material, but on real guitar recordings it will miss notes, produce spurious
+  partials (harmonics detected as extra notes), and may merge or split notes
+  incorrectly. No source separation is performed — mixed-instruments audio is
+  not supported.
+- **Pitches below ~150 Hz are not detected** (`piptrack` `fmin` default), so
+  the low E, A, and D strings of a guitar are currently invisible to the
+  transcriber.
+- **Tempo estimation is unreliable** on rubato or atypical audio; it falls
+  back to 120 BPM when the tracker fails, which also affects quantization and
+  note durations in notation export.
+- **MP3 import** requires `pydub` + `ffmpeg`. WAV works with no extra setup.
+- **Playback mixing** uses FluidSynth when a soundfont is installed; otherwise
+  it falls back to a built-in additive synthesizer (crude sine-based sound).
+- **Sheet/tablature export** writes a single un-measured part; rhythms are
+  snapped to the nearest notatable value. Tablature carries string/fret
+  technical annotations but is not a full tab staff layout.
+- **In-memory project store**: projects are lost on backend restart, and there
+  is no authentication — the API listens on localhost only.
 
 ## Building a Windows Installer
 

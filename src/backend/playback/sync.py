@@ -5,6 +5,23 @@ import soundfile as sf
 import pretty_midi
 
 
+def synthesize_midi(pm, sr):
+    """Render a PrettyMIDI object to audio.
+
+    Uses fluidsynth when a soundfont/synth is available, otherwise falls back
+    to pretty_midi's built-in additive synthesizer (no external dependencies).
+    """
+    try:
+        return pm.fluidsynth(fs=sr)
+    except Exception:
+        parts = [inst.synthesize(fs=sr) for inst in pm.instruments]
+        n = max((len(p) for p in parts), default=0)
+        out = np.zeros(n)
+        for p in parts:
+            out[: len(p)] += p
+        return out
+
+
 def render_synced_audio(original_wav, midi_path, output_path, mix_ratio=0.5):
     """
     Mix the original audio with a synthesized MIDI accompaniment.
@@ -15,7 +32,7 @@ def render_synced_audio(original_wav, midi_path, output_path, mix_ratio=0.5):
         y = y.mean(axis=1)
 
     pm = pretty_midi.PrettyMIDI(midi_path)
-    midi_audio = pm.fluidsynth(fs=sr)
+    midi_audio = synthesize_midi(pm, sr)
     if len(midi_audio) > len(y):
         y = np.pad(y, (0, len(midi_audio) - len(y)), mode="constant")
     elif len(midi_audio) < len(y):
