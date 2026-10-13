@@ -3,6 +3,7 @@ import os
 import uuid
 import shutil
 import tempfile
+from datetime import datetime
 from typing import Dict, List
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form
 from fastapi.responses import FileResponse
@@ -34,6 +35,9 @@ app.add_middleware(
 UPLOAD_DIR = tempfile.mkdtemp(prefix="gat_uploads_")
 OUTPUT_DIR = os.path.join(UPLOAD_DIR, "exports")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+RECORDINGS_DIR = os.path.join(REPO_ROOT, "recordings")
 
 # In-memory project store
 PROJECTS: Dict[str, dict] = {}
@@ -81,7 +85,9 @@ def _run_transcription(project):
     try:
         from .audio_processing.neural_transcription import transcribe_neural
 
-        return transcribe_neural(project["audio_path"]), "basic-pitch"
+        return (transcribe_neural(project["audio_path"],
+                                  y=project["y"], sr=project["sr"]),
+                "basic-pitch")
     except Exception as exc:
         logging.warning("Basic Pitch unavailable (%s); using DSP pipeline", exc)
 
@@ -122,6 +128,19 @@ async def transcribe(project_id: str, quantize: bool = True, q_strength: float =
         "engine": engine,
         "tracks": {"Guitar": flat_notes},
     }
+
+
+@app.post("/recordings")
+async def save_recording(file: UploadFile = File(...), name: str = Form("")):
+    """Save a recorded take into the repo's recordings/ dir for tuning."""
+    os.makedirs(RECORDINGS_DIR, exist_ok=True)
+    base = os.path.basename(name) if name else datetime.now().strftime("take-%Y%m%d-%H%M%S")
+    if not base.lower().endswith(".wav"):
+        base += ".wav"
+    path = os.path.join(RECORDINGS_DIR, base)
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"path": path, "filename": base}
 
 
 @app.get("/tracks/{project_id}")

@@ -6,6 +6,13 @@ const http = require('http');
 
 const API_URL = 'http://127.0.0.1:8000';
 
+process.on('uncaughtException', (err) => {
+  try {
+    const logPath = path.join(app.getPath('userData'), 'gat-error.log');
+    fs.appendFileSync(logPath, `${new Date().toISOString()} ${err.stack}\n`);
+  } catch (_) { /* ignore logging failure */ }
+});
+
 function findBackend() {
   const resources = process.resourcesPath;
   const candidates = [

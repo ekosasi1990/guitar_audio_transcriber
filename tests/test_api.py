@@ -126,6 +126,19 @@ def test_sheet_musicxml(client, melody_wav):
     assert root.findall(".//note")
 
 
+def test_save_recording_to_repo_dir(client, melody_wav, tmp_path, monkeypatch):
+    from src.backend import api
+    monkeypatch.setattr(api, "RECORDINGS_DIR", str(tmp_path))
+    with open(melody_wav, "rb") as f:
+        res = client.post("/recordings",
+                          files={"file": ("take.wav", f, "audio/wav")},
+                          data={"name": "mytake"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["filename"] == "mytake.wav"
+    assert (tmp_path / "mytake.wav").exists()
+
+
 def test_sheet_tablature(client, melody_wav):
     pid = _upload(client, melody_wav)
     _transcribe(client, pid)

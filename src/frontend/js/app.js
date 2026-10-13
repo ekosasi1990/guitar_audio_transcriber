@@ -29,6 +29,7 @@ const ctx = canvas.getContext('2d');
 const recorder = new MicRecorder();
 let meterInterval = null;
 let timerInterval = null;
+let lastTakeBlob = null;
 
 function setStatus(text) {
   statusMsg.textContent = text;
@@ -37,6 +38,7 @@ function setStatus(text) {
 uploadBtn.addEventListener('click', uploadAudio);
 recordBtn.addEventListener('click', startRecording);
 stopRecordBtn.addEventListener('click', stopRecording);
+document.getElementById('saveTakeBtn').addEventListener('click', saveTake);
 transcribeBtn.addEventListener('click', transcribeAudio);
 document.getElementById('updateNoteBtn').addEventListener('click', updateNote);
 document.getElementById('addAccompanimentBtn').addEventListener('click', addAccompaniment);
@@ -107,12 +109,25 @@ async function stopRecording() {
     return;
   }
 
+  lastTakeBlob = wavBlob;
+  document.getElementById('saveTakeBtn').disabled = false;
+
   const url = URL.createObjectURL(wavBlob);
   recordedAudio.src = url;
   recordedAudio.classList.remove('hidden');
 
   setStatus('Processing recording...');
   await uploadFile(wavBlob, 'recording.wav');
+}
+
+async function saveTake() {
+  if (!lastTakeBlob) return;
+  const form = new FormData();
+  form.append('file', lastTakeBlob, 'take.wav');
+  form.append('name', '');
+  const res = await fetch(`${API_URL}/recordings`, { method: 'POST', body: form });
+  const data = await res.json();
+  setStatus(`Take saved to repo: recordings/${data.filename}`);
 }
 
 async function transcribeAudio() {

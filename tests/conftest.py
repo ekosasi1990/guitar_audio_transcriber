@@ -79,6 +79,20 @@ def plucks_wav(tmp_path_factory):
     return str(path)
 
 
+@pytest.fixture(scope="session")
+def replucks_wav(tmp_path_factory):
+    """The same pitch plucked twice — the second attack lands while the
+    first note is still ringing."""
+    path = tmp_path_factory.mktemp("audio") / "replucks.wav"
+    y = np.zeros(int(3.0 * SR), dtype=np.float32)
+    for start in (0.10, 0.80):
+        tone = synth_pluck(64, 1.4, SR)
+        i0 = int(start * SR)
+        y[i0 : i0 + len(tone)] += tone
+    sf.write(str(path), y, SR)
+    return str(path)
+
+
 # A simple "melody": G4, B4, D5, G4 with true silence between notes.
 MELODY_EVENTS = [
     (0.10, 0.40, [67]),  # G4

@@ -21,14 +21,21 @@ def _get_model():
 
 def transcribe_neural(audio_path, min_freq=75.0, max_freq=1500.0,
                       onset_threshold=0.6, frame_threshold=0.4,
-                      minimum_note_length=140.0):
+                      minimum_note_length=140.0, y=None, sr=None):
     """Return flat note dicts [{pitch, start, end, velocity}] for audio_path.
 
     Thresholds are tuned for picked guitar: a higher onset threshold means
     only real pluck attacks spawn notes, and a higher frame threshold means
     decaying sustain does not re-articulate as octave/harmonic notes.
+    Note re-articulation (re-plucking a still-ringing string) is handled
+    after inference by onset/band-energy analysis.
     """
     from basic_pitch.inference import predict
+    from .articulation import split_rearticulated
+
+    if y is None or sr is None:
+        from .loader import load_audio
+        y, sr = load_audio(audio_path)
 
     _, _, note_events = predict(
         audio_path,
@@ -50,18 +57,21 @@ def transcribe_neural(audio_path, min_freq=75.0, max_freq=1500.0,
             "end": float(end_s),
             "velocity": max(1, min(127, int(round(confidence * 127)))),
         })
-    return _merge_retriggered(notes)
+    notes = _merge_retriggered(notes)
+    return split_rearticulated(notes, y, sr)
 
 
-def _merge_retriggered(notes, max_gap=0.08):
-    """Merge a note with a same-pitch re-trigger that starts almost
-    immediately after it ended (sustain tail re-articulation)."""
+def _merge_retriggered(notes):
+    """Merge same-pitch events that overlap in time (duplicates).
+
+    Abutting notes are kept separate: a note ending exactly where the next
+    same-pitch note starts is a re-articulation boundary, not a stutter.
+    """
     out = []
     for n in sorted(notes, key=lambda n: (n["start"], n["pitch"])):
         prev = out[-1] if out else None
-        if (prev and prev["pitch"] == n["pitch"]
-                and 0 <= n["start"] - prev["end"] <= max_gap):
-            prev["end"] = n["end"]
+        if prev and prev["pitch"] == n["pitch"] and n["start"] < prev["end"]:
+            prev["end"] = max(prev["end"], n["end"])
             prev["velocity"] = max(prev["velocity"], n["velocity"])
         else:
             out.append(dict(n))

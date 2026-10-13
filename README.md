@@ -111,6 +111,38 @@ python -m pytest tests -m "not accuracy"  # functional tests only
 5. Add accompaniment tracks if desired.
 6. Export the result to MIDI or view sheet music / tablature.
 
+### Saving takes for tuning
+
+After a recording stops, click **Save Take to Repo** to store the WAV under
+`recordings/` in this repository. Analyze a take and compare it with what
+was played:
+
+```cmd
+.venv\Scripts\python tools\tune_recording.py recordings\take-YYYYMMDD-HHMMSS.wav
+```
+
+It prints the detected onsets, every note event (onset, end, pitch, name,
+confidence), and a BPM estimate. Optionally pass an `expected.json`
+(`[{"pitch": 40, "start": 0.5}, ...]`) to get matched/missed/extra counts.
+
+### Onset vs. sustain
+
+The pipeline treats a note start (attack) and its ringing tail (sustain)
+as separate concepts:
+
+- Basic Pitch thresholds are tuned so only real pluck attacks create
+  note starts, and the decaying sustain cannot hold spurious harmonic
+  pitches open (`onset_threshold=0.6`, `frame_threshold=0.4`).
+- Same-pitch events that abut are kept only when a librosa-detected onset
+  exists at the seam — otherwise they are re-joined (the model split a
+  sustained note internally). A fused note is split at an onset when the
+  note's own frequency band gains energy there (a re-pluck).
+
+Practical tips when recording for tuning: palm-mute or fret-mute strings
+after each note to shorten sustain, mute unused strings, and use a clean
+amp sound — heavy distortion/resonance is the hardest input for any
+transcriber.
+
 ## Known limitations
 
 - **Transcription quality depends on the engine.** With Basic Pitch installed
