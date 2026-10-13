@@ -88,18 +88,24 @@ async function startRecording() {
     meterInterval = setInterval(drawLevelMeter, 50);
     timerInterval = setInterval(updateRecordTimer, 100);
   } catch (err) {
-    alert('Could not start microphone: ' + err.message);
-    setStatus('Microphone access denied or unavailable');
+    setStatus('Microphone error: ' + (err && err.message ? err.message : String(err)));
   }
 }
 
 async function stopRecording() {
-  const wavBlob = recorder.stop();
   recordBtn.disabled = false;
   stopRecordBtn.disabled = true;
   clearInterval(meterInterval);
   clearInterval(timerInterval);
   levelMeter.classList.add('hidden');
+
+  let wavBlob;
+  try {
+    wavBlob = await recorder.stop();
+  } catch (err) {
+    setStatus('Recording failed: ' + (err && err.message ? err.message : String(err)));
+    return;
+  }
 
   const url = URL.createObjectURL(wavBlob);
   recordedAudio.src = url;

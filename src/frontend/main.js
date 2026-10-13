@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -49,6 +49,14 @@ function waitForBackend(callback) {
 }
 
 function createWindow() {
+  // Grant microphone/camera permission requests (needed for recording).
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
+    callback(permission === 'media' || permission === 'mediaKeySystem');
+  });
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => {
+    return permission === 'media' || permission === 'mediaKeySystem';
+  });
+
   const win = new BrowserWindow({
     width: 1280,
     height: 900,

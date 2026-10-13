@@ -1,9 +1,20 @@
+const CAPTURE_WORKLET = `
+class PcmCapture extends AudioWorkletProcessor {
+  process(inputs) {
+    const ch = inputs[0];
+    if (ch && ch[0]) this.port.postMessage(ch[0].slice(0));
+    return true;
+  }
+}
+registerProcessor('gat-pcm-capture', PcmCapture);
+`;
+
 class MicRecorder {
   constructor() {
     this.audioCtx = null;
     this.source = null;
     this.analyser = null;
-    this.processor = null;
+    this.worklet = null;
     this.stream = null;
     this.chunks = [];
     this.sampleRate = 44100;
@@ -13,21 +24,42 @@ class MicRecorder {
 
   async start() {
     this.chunks = [];
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Microphone access is not available in this context');
+    }
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: this.sampleRate });
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const workletUrl = URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: 'application/javascript' }));
+    try {
+      await this.audioCtx.audioWorklet.addModule(workletUrl);
+    } finally {
+      URL.revokeObjectURL(workletUrl);
+    }
+
     this.source = this.audioCtx.createMediaStreamSource(this.stream);
     this.analyser = this.audioCtx.createAnalyser();
     this.analyser.fftSize = 256;
-    this.processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
-
-    this.processor.onaudioprocess = (event) => {
-      const data = new Float32Array(event.inputBuffer.getChannelData(0));
-      this.chunks.push(new Float32Array(data));
+    this.worklet = new AudioWorkletNode(this.audioCtx, 'gat-pcm-capture');
+    this.worklet.port.onmessage = (event) => {
+      this.chunks.push(event.data);
     };
+    // AudioWorkletNode only runs when connected to destination; a muted gain
+    // node keeps it silent instead of playing the mic back.
+    const mute = this.audioCtx.createGain();
+    mute.gain.value = 0;
 
     this.source.connect(this.analyser);
-    this.analyser.connect(this.processor);
-    this.processor.connect(this.audioCtx.destination);
+    this.source.connect(this.worklet);
+    this.worklet.connect(mute);
+    mute.connect(this.audioCtx.destination);
+
     this.isRecording = true;
     this.startTime = Date.now();
   }
@@ -47,18 +79,23 @@ class MicRecorder {
 
   stop() {
     this.isRecording = false;
-    if (this.processor) {
-      this.processor.disconnect();
+    if (this.worklet) {
+      this.worklet.port.onmessage = null;
+      this.worklet.disconnect();
+      this.worklet = null;
+    }
+    if (this.source) {
       this.source.disconnect();
-      this.processor = null;
       this.source = null;
+      this.analyser = null;
     }
     if (this.stream) {
       this.stream.getTracks().forEach(track => track.stop());
       this.stream = null;
     }
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
-      this.audioCtx.close();
+      this.audioCtx.close().catch(() => {});
+      this.audioCtx = null;
     }
 
     // Concatenate all chunks
