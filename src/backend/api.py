@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 import shutil
@@ -75,18 +76,18 @@ async def upload_audio(file: UploadFile = File(...)):
     return {"project_id": project_id, "duration": len(y) / sr}
 
 
-@app.post("/transcribe/{project_id}")
-async def transcribe(project_id: str, quantize: bool = True, q_strength: float = 1.0):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = PROJECTS[project_id]
-    y, sr = project["y"], project["sr"]
+def _run_transcription(project):
+    """Return (flat_notes, engine_name) using Basic Pitch when available."""
+    try:
+        from .audio_processing.neural_transcription import transcribe_neural
 
-    bpm, _ = estimate_tempo(y, sr)
+        return transcribe_neural(project["audio_path"]), "basic-pitch"
+    except Exception as exc:
+        logging.warning("Basic Pitch unavailable (%s); using DSP pipeline", exc)
+
+    y, sr = project["y"], project["sr"]
     onsets, offsets = detect_onsets(y, sr)
     raw_notes = detect_pitches(y, sr, onsets, offsets)
-
-    # Flatten polyphonic groups to individual notes
     flat_notes = []
     for group in raw_notes:
         for pitch in group["pitches"]:
@@ -96,6 +97,18 @@ async def transcribe(project_id: str, quantize: bool = True, q_strength: float =
                 "end": group["end"],
                 "velocity": 80,
             })
+    return flat_notes, "dsp"
+
+
+@app.post("/transcribe/{project_id}")
+async def transcribe(project_id: str, quantize: bool = True, q_strength: float = 1.0):
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
+    y, sr = project["y"], project["sr"]
+
+    bpm, _ = estimate_tempo(y, sr)
+    flat_notes, engine = _run_transcription(project)
 
     if quantize:
         flat_notes = quantize_notes(flat_notes, bpm, strength=q_strength)
@@ -106,6 +119,7 @@ async def transcribe(project_id: str, quantize: bool = True, q_strength: float =
     return {
         "project_id": project_id,
         "bpm": bpm,
+        "engine": engine,
         "tracks": {"Guitar": flat_notes},
     }
 

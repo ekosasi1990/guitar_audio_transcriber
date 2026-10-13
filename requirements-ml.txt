@@ -1,0 +1,11 @@
+# Optional neural transcription backend (Spotify Basic Pitch, ONNX runtime).
+# NOTE: install in two steps — the upstream basic-pitch package pins
+# numpy<1.24 which cannot build on Python 3.13+, but the code itself is
+# compatible with newer numpy, so we install it with --no-deps:
+#
+#   pip install -r requirements-ml.txt
+#   pip install --no-deps basic-pitch
+#
+onnxruntime>=1.17
+mir-eval>=0.6
+resampy>=0.2.2,<0.4.3

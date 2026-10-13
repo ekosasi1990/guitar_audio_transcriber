@@ -42,6 +42,21 @@ npm install
 > backport is installed automatically via `requirements.txt`. MP3 decoding
 > additionally requires `ffmpeg` on PATH; WAV files need neither.
 
+### Neural transcription (recommended)
+
+By default the app transcribes with **Spotify Basic Pitch** (polyphonic
+neural model, ONNX runtime — no GPU needed). If it isn't installed, the app
+silently falls back to a much weaker onset+piptrack DSP pipeline.
+
+```cmd
+python -m pip install -r requirements-ml.txt
+python -m pip install --no-deps basic-pitch
+```
+
+(`--no-deps` is required because upstream `basic-pitch` pins `numpy<1.24`,
+which cannot build on Python 3.13+; the code itself works fine with newer
+numpy.)
+
 ### Launch the app (Windows)
 
 Double-click `start.bat` or run in Command Prompt:
@@ -98,15 +113,16 @@ python -m pytest tests -m "not accuracy"  # functional tests only
 
 ## Known limitations
 
-- **Transcription quality is basic.** The pipeline (onset detection +
-  `librosa.piptrack` per segment) works on clean monophonic/simple polyphonic
-  material, but on real guitar recordings it will miss notes, produce spurious
-  partials (harmonics detected as extra notes), and may merge or split notes
-  incorrectly. No source separation is performed — mixed-instruments audio is
-  not supported.
-- **Pitches below ~150 Hz are not detected** (`piptrack` `fmin` default), so
-  the low E, A, and D strings of a guitar are currently invisible to the
-  transcriber.
+- **Transcription quality depends on the engine.** With Basic Pitch installed
+  (see setup), polyphonic note detection is quite good for solo guitar. The
+  built-in DSP fallback (onset detection + `librosa.piptrack`) works only on
+  clean monophonic material and produces spurious partials on real recordings.
+  No source separation is performed — mixed-instrument audio is not supported.
+- **Playback synthesis is crude** — the fallback synthesizer is a simple
+  additive synth. Install FluidSynth + a General MIDI soundfont for better
+  playback sound.
+- **DSP fallback misses pitches below ~150 Hz** (`piptrack` floor is 75 Hz but
+  reliable detection needs ~150+); Basic Pitch does not have this limitation.
 - **Tempo estimation is unreliable** on rubato or atypical audio; it falls
   back to 120 BPM when the tracker fails, which also affects quantization and
   note durations in notation export.
