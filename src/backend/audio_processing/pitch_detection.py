@@ -11,7 +11,8 @@ def detect_pitches(y, sr, onsets, offsets):
     """
     hop_length = 512
     pitches, magnitudes = librosa.piptrack(
-        y=y, sr=sr, hop_length=hop_length, threshold=0.2
+        y=y, sr=sr, hop_length=hop_length, threshold=0.2,
+        fmin=75.0, fmax=1500.0,  # cover low E (~82 Hz) up to ~fret 17 high E
     )
     times = librosa.frames_to_time(np.arange(pitches.shape[1]), sr=sr, hop_length=hop_length)
 
