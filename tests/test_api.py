@@ -1,6 +1,7 @@
 """API-level functional tests covering the core workflow:
 upload -> transcribe -> edit/tracks -> export MIDI -> sheet/playback.
 """
+
 import io
 import xml.etree.ElementTree as ET
 
@@ -88,8 +89,13 @@ def test_edit_note(client, melody_wav):
 def test_edit_unknown_track_returns_404(client, melody_wav):
     pid = _upload(client, melody_wav)
     edit = {
-        "track": "Nope", "old_pitch": 60, "old_start": 0.0,
-        "new_pitch": 60, "new_start": 0.0, "new_end": 1.0, "new_velocity": 80,
+        "track": "Nope",
+        "old_pitch": 60,
+        "old_start": 0.0,
+        "new_pitch": 60,
+        "new_start": 0.0,
+        "new_end": 1.0,
+        "new_velocity": 80,
     }
     assert client.post(f"/edit/{pid}", json=edit).status_code == 404
 
@@ -128,11 +134,14 @@ def test_sheet_musicxml(client, melody_wav):
 
 def test_save_recording_to_repo_dir(client, melody_wav, tmp_path, monkeypatch):
     from src.backend import api
+
     monkeypatch.setattr(api, "RECORDINGS_DIR", str(tmp_path))
     with open(melody_wav, "rb") as f:
-        res = client.post("/recordings",
-                          files={"file": ("take.wav", f, "audio/wav")},
-                          data={"name": "mytake"})
+        res = client.post(
+            "/recordings",
+            files={"file": ("take.wav", f, "audio/wav")},
+            data={"name": "mytake"},
+        )
     assert res.status_code == 200
     data = res.json()
     assert data["filename"] == "mytake.wav"

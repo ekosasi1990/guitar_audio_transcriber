@@ -1,63 +1,40 @@
 # Python
+.venv/
+venv/
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
+*.egg-info/
+.pytest_cache/
+.test-temp/
+.coverage
+htmlcov/
+
+# Node and build output
+node_modules/
 dist/
 dist-backend/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-.env
-.venv/
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# PyCharm / VSCode
-.idea/
-.vscode/
-*.iml
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
-
-# Electron
+build/
+*.spec
 coverage/
 *.log
 
-# Audio and MIDI artifacts
-*.mid
-*.midi
+# Local configuration
+.env
+.env.*
+.idea/
+.vscode/
+
+# Recordings and generated exports
 *.wav
 *.mp3
 *.flac
 *.ogg
+*.mid
+*.midi
 output/
 exports/
 
-# OS
+# Operating system files
 .DS_Store
 Thumbs.db
 desktop.ini

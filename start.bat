@@ -1,9 +1,16 @@
 @echo off
-echo Starting Guitar Audio Transcriber...
-
-start "GAT Backend" python -m uvicorn src.backend.api:app --reload
-timeout /t 2 >nul
-start "GAT Frontend" npm start
-
-echo Backend: http://127.0.0.1:8000
-echo Frontend window should appear shortly.
+setlocal
+cd /d "%~dp0"
+title Guitar Audio Transcriber
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" "tools\launch_app.py" %*
+) else (
+    python "tools\launch_app.py" %*
+)
+if errorlevel 1 (
+    echo.
+    echo Startup failed. See the message above.
+    pause
+    exit /b 1
+)
+exit /b 0

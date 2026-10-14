@@ -8,6 +8,7 @@ librosa's onset detector and splits a held note only when the note's own
 frequency band gains energy at the onset — evidence of a re-articulation,
 not just another note in the chord.
 """
+
 import numpy as np
 import librosa
 from scipy.signal import butter, sosfiltfilt
@@ -21,8 +22,9 @@ def _band_rms(y, sr, f_lo, f_hi, t0, t1):
     i0, i1 = max(0, int(t0 * sr)), min(len(y), int(t1 * sr))
     if i1 - i0 < 64:
         return 0.0
-    sos = butter(4, [f_lo / (sr / 2), min(f_hi / (sr / 2), 0.99)],
-                 btype="band", output="sos")
+    sos = butter(
+        4, [f_lo / (sr / 2), min(f_hi / (sr / 2), 0.99)], btype="band", output="sos"
+    )
     return float(np.sqrt(np.mean(sosfiltfilt(sos, y[i0:i1]) ** 2)))
 
 
@@ -46,8 +48,7 @@ def _join_sustains(notes, onset_times, seam_tol=0.05, max_gap=0.03):
     return out
 
 
-def split_rearticulated(notes, y, sr, window=0.05, growth=1.2,
-                        min_segment=0.08):
+def split_rearticulated(notes, y, sr, window=0.05, growth=1.2, min_segment=0.08):
     """Separate attacks from sustain.
 
     1. Same-pitch events split internally by the model are re-joined when
@@ -59,9 +60,7 @@ def split_rearticulated(notes, y, sr, window=0.05, growth=1.2,
     """
     if not notes:
         return notes
-    onset_times = librosa.onset.onset_detect(
-        y=y, sr=sr, units="time", backtrack=True
-    )
+    onset_times = librosa.onset.onset_detect(y=y, sr=sr, units="time", backtrack=True)
     out = []
     for note in _join_sustains(notes, onset_times):
         f = _midi_hz(note["pitch"])

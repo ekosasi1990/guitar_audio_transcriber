@@ -1,71 +1,285 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Guitar Audio Transcriber</title>
-  <link rel="stylesheet" href="css/styles.css" />
-</head>
-<body>
-  <header>
-    <h1>Guitar Audio Transcriber</h1>
-    <p>Convert MP3 / WAV guitar recordings into editable MIDI, sheet music, and tablature.</p>
-  </header>
-
-  <main>
-    <section id="upload-section">
-      <input type="file" id="audioInput" accept=".mp3,.wav" />
-      <button id="uploadBtn">Upload</button>
-      <button id="recordBtn">Record</button>
-      <button id="stopRecordBtn" disabled>Stop Recording</button>
-      <button id="saveTakeBtn" disabled>Save Take to Repo</button>
-      <span id="recordTimer" class="hidden">0.0s</span>
-      <button id="transcribeBtn" disabled>Transcribe</button>
-      <p id="statusMsg" class="status">Ready</p>
-      <canvas id="levelMeter" width="300" height="20" class="hidden"></canvas>
-      <audio id="recordedAudio" controls class="hidden"></audio>
-    </section>
-
-    <section id="info-section" class="hidden">
-      <p>Project: <span id="projectId"></span></p>
-      <p>BPM: <span id="bpmDisplay"></span></p>
-    </section>
-
-    <section id="editor-section" class="hidden">
-      <h2>Multitrack Editor</h2>
-      <div id="trackList"></div>
-      <canvas id="pianoRoll" width="1200" height="400"></canvas>
-
-      <div id="editControls">
-        <h3>Edit Selected Note</h3>
-        <label>Pitch: <input type="number" id="editPitch" min="0" max="127" /></label>
-        <label>Start: <input type="number" id="editStart" step="0.01" /></label>
-        <label>End: <input type="number" id="editEnd" step="0.01" /></label>
-        <label>Velocity: <input type="number" id="editVelocity" min="0" max="127" /></label>
-        <button id="updateNoteBtn">Update Note</button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guitar Transcriber</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#sheet">Skip to note sheet</a>
+    <header>
+      <h1>Guitar Transcriber</h1>
+      <span>Local audio processing</span>
+    </header>
+    <main>
+      <section class="toolbar" aria-label="Recording controls">
+        <input type="file" id="audioInput" accept=".wav,.mp3" class="file-input" tabindex="-1" />
+        <button id="openBtn">Open audio</button>
+        <button id="recordBtn"><span class="record-dot" aria-hidden="true"></span>Record</button>
+        <button id="stopRecordBtn" disabled>Stop recording</button>
+        <label for="transcriptionMode"
+          >Playing<select id="transcriptionMode">
+            <option value="melody">Single notes</option>
+            <option value="chords">Chords</option>
+          </select></label
+        >
+        <label for="stringSet"
+          >Strings<select id="stringSet">
+            <option value="all">All 6 strings</option>
+            <option value="top">Top 3 · high e, B, G</option>
+            <option value="bottom">Bottom 3 · low E, A, D</option>
+          </select></label
+        >
+        <label for="targetBpm"
+          >Target BPM<input
+            id="targetBpm"
+            type="number"
+            min="20"
+            max="300"
+            step="0.1"
+            placeholder="Auto"
+        /></label>
+        <button
+          id="detectTempoBtn"
+          class="compact"
+          title="Use the tempo estimated from the recording"
+          disabled
+        >
+          Detect tempo
+        </button>
+        <span id="recordTimer" class="hidden">0:00</span>
+        <meter
+          id="levelMeter"
+          min="0"
+          max="1"
+          value="0"
+          class="hidden"
+          aria-label="Microphone level"
+        ></meter>
+      </section>
+      <div class="document-row">
+        <strong id="fileName">Untitled take</strong><span id="noteCount">No notes yet</span>
       </div>
-
-      <div id="accompanimentControls">
-        <h3>Accompaniment</h3>
-        <textarea id="chordsInput" rows="4" cols="40">[[0, "C"], [4, "G"], [8, "Am"], [12, "F"]]</textarea>
-        <button id="addAccompanimentBtn">Add Accompaniment</button>
-      </div>
-
-      <div id="exportControls">
-        <button id="exportMidiBtn">Export MIDI</button>
-        <button id="exportSheetBtn">Export Sheet Music</button>
-        <button id="exportTabBtn">Export Tablature</button>
-        <button id="playbackBtn">Generate Playback Mix</button>
-      </div>
-
-      <div id="playbackSection" class="hidden">
-        <h3>Playback</h3>
-        <audio id="mixAudio" controls></audio>
-      </div>
-    </section>
-  </main>
-
-  <script src="js/recorder.js"></script>
-  <script src="js/app.js"></script>
-</body>
+      <p id="statusMsg" role="status" aria-live="polite">
+        Open a recording or press Record. Your notes will appear below.
+      </p>
+      <section id="sheet" aria-label="Generated note sheet">
+        <div class="sheet-tools">
+          <div role="group" aria-label="Sheet view">
+            <button id="tabViewBtn" aria-pressed="true">Tablature</button
+            ><button id="notesViewBtn" aria-pressed="false">Notes</button>
+          </div>
+          <label for="zoomInput"
+            >Zoom<input id="zoomInput" type="range" min="35" max="180" value="85" /></label
+          ><label class="check"
+            ><input id="followPlayback" type="checkbox" checked />Follow playback</label
+          >
+        </div>
+        <div
+          id="graphViewport"
+          tabindex="0"
+          aria-label="Scrollable note sheet. Click or drag the sheet to move playback position."
+        >
+          <div id="graphContent">
+            <canvas
+              id="pianoRoll"
+              width="1000"
+              height="360"
+              role="img"
+              aria-label="Guitar tablature and note timing"
+            ></canvas>
+            <div id="playhead" aria-hidden="true"><span></span></div>
+          </div>
+        </div>
+        <div class="sheet-scrollbar" aria-label="Sheet scrolling">
+          <button id="scrollLeftBtn" aria-label="Scroll sheet left">←</button
+          ><input
+            id="sheetScroll"
+            type="range"
+            min="0"
+            max="0"
+            step="1"
+            value="0"
+            aria-label="Scroll through note sheet"
+          /><button id="scrollRightBtn" aria-label="Scroll sheet right">→</button
+          ><button id="followCursorBtn">Follow cursor</button>
+        </div>
+        <div class="transport">
+          <button id="playBtn" class="primary" disabled>Play</button
+          ><button id="stopPlaybackBtn" disabled>Back to start</button
+          ><label class="seek-label" for="seekInput"
+            >Playback position<input
+              id="seekInput"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+              disabled /></label
+          ><output id="playbackTime">0:00 / 0:00</output>
+        </div>
+        <div class="export-row">
+          <button id="playbackBtn" disabled>Create playback</button
+          ><button id="exportMidiBtn" disabled>Download MIDI</button
+          ><button id="exportSheetBtn" disabled>Sheet music</button
+          ><button id="exportTabBtn" disabled>Download tab</button
+          ><span class="hint"
+            >Click or drag the sheet to start anywhere. Scroll to see the rest.</span
+          >
+        </div>
+        <audio id="mixAudio" preload="auto"></audio>
+      </section>
+      <details id="advanced">
+        <summary>Advanced</summary>
+        <div class="advanced-content">
+          <fieldset>
+            <legend>Transcription &amp; recording</legend>
+            <div class="settings-row">
+              <label for="noiseFloor"
+                >Noise cleanup<select id="noiseFloor">
+                  <option value="0.2">Light</option>
+                  <option value="0.3" selected>Balanced</option>
+                  <option value="0.45">Strong</option>
+                </select></label
+              >
+              <label class="check"
+                ><input id="neuralChords" type="checkbox" />Use Basic Pitch for chords</label
+              >
+              <label class="check"
+                ><input id="liveNotes" type="checkbox" checked />Live note preview</label
+              >
+              <label class="check"
+                ><input id="autoStop" type="checkbox" checked />Stop after 3 seconds of
+                silence</label
+              >
+              <button id="transcribeBtn" disabled>Transcribe again</button
+              ><button id="saveTakeBtn" disabled>Save recording locally</button>
+            </div>
+            <p class="hint">
+              Live notes are provisional. The completed take is analyzed again after recording
+              stops. Recording waits for confirmed guitar playing, then keeps the first pluck from
+              the audio buffer. Brief noises do not start the take.
+            </p>
+            <label for="playbackMix"
+              >Playback source<select id="playbackMix">
+                <option value="1">Transcribed notes</option>
+                <option value="0.5">Notes + original audio (performed timing only)</option>
+              </select></label
+            >
+            <details class="nested">
+              <summary>Original recording</summary>
+              <audio id="recordedAudio" controls aria-label="Original recording"></audio>
+            </details>
+          </fieldset>
+          <fieldset>
+            <legend>Rhythm</legend>
+            <div class="settings-row">
+              <label class="check"
+                ><input id="automaticRhythm" type="checkbox" checked />Tidy timing
+                automatically</label
+              ><label class="check"
+                ><input id="recognizePatterns" type="checkbox" checked />Keep repeated groups in
+                bars</label
+              ><label for="intendedSpacing"
+                >Intended spacing<select id="intendedSpacing">
+                  <option value="auto">Infer recurring rhythm</option>
+                  <option value="sixteenth">Even sixteenths · 4 per beat</option>
+                  <option value="eighth">Even eighths · 2 per beat</option>
+                  <option value="quarter">Even quarters · 1 per beat</option>
+                </select></label
+              ><label class="check"
+                ><input id="consistentLengths" type="checkbox" checked />Consistent repeated-note
+                lengths</label
+              ><label for="gridInput"
+                >Grid resolution<select id="gridInput">
+                  <option value="2">Eighth notes</option>
+                  <option value="4" selected>Sixteenth notes</option>
+                  <option value="8">Thirty-second notes</option>
+                </select></label
+              ><label for="fitBeats"
+                >Quarter-note beats per bar<input
+                  id="fitBeats"
+                  type="number"
+                  min="1"
+                  max="12"
+                  value="4" /></label
+              ><button id="applyTimingBtn" disabled>Apply timing settings</button
+              ><button id="undoRhythmBtn" disabled>Undo timing change</button>
+            </div>
+            <p class="hint">
+              Infer recurring rhythm groups similar gaps and fits them to consistent beat lengths,
+              retaining clear pauses. Grid resolution allows sixteenth notes; it does not make every
+              note a sixteenth. Choose Even sixteenths when you intend four notes per beat, then
+              Apply timing settings. Repeated notes of the same beat length share a sounding length.
+              Turn that off to keep articulation differences. BPM sets beat speed; changing it
+              afterwards preserves positions in bars.
+            </p>
+            <details class="nested">
+              <summary>Assign an intended rhythm manually</summary>
+              <div class="settings-row">
+                <label for="fitMeasures"
+                  >Bars<input id="fitMeasures" type="number" min="1" max="128" value="1" /></label
+                ><label for="fitNotes"
+                  >Attacks per bar<input
+                    id="fitNotes"
+                    type="number"
+                    min="1"
+                    max="64"
+                    value="4" /></label
+                ><label for="fitArticulation"
+                  >Note length<select id="fitArticulation">
+                    <option value="preserve">Keep articulation</option>
+                    <option value="staccato">Short notes</option>
+                    <option value="connected">Hold to next attack</option>
+                  </select></label
+                ><button id="fitRhythmBtn" disabled>Assign rhythm</button>
+              </div>
+              <label for="fitPattern"
+                >Optional beat lengths for one bar<input
+                  id="fitPattern"
+                  type="text"
+                  placeholder="1, 0.5, 0.5, 1, 1"
+              /></label>
+              <p class="hint">
+                Use quarter-beat steps (0.25, 0.5, 1…). A chord uses one attack slot. Blank means
+                even spacing.
+              </p>
+              <p id="rhythmSummary" role="status"></p>
+            </details>
+          </fieldset>
+          <details id="noteEditor" class="nested">
+            <summary>Edit notes</summary>
+            <div class="editor-grid">
+              <div>
+                <label for="noteSelect">Notes</label
+                ><select id="noteSelect" size="7" aria-label="Select a note to edit"></select>
+              </div>
+              <fieldset id="editControls" disabled>
+                <legend>Selected note</legend>
+                <div class="settings-row">
+                  <label for="editPitch"
+                    >Pitch (MIDI)<input id="editPitch" type="number" min="0" max="127" /></label
+                  ><label for="editStart"
+                    >Start (seconds)<input
+                      id="editStart"
+                      type="number"
+                      min="0"
+                      step="0.01" /></label
+                  ><label for="editEnd"
+                    >End (seconds)<input id="editEnd" type="number" min="0" step="0.01" /></label
+                  ><label for="editVelocity"
+                    >Loudness<input id="editVelocity" type="number" min="1" max="127"
+                  /></label>
+                </div>
+                <button id="updateNoteBtn">Save note</button>
+              </fieldset>
+            </div>
+          </details>
+        </div>
+      </details>
+    </main>
+    <script src="js/recorder.js"></script>
+    <script src="js/app.js"></script>
+  </body>
 </html>

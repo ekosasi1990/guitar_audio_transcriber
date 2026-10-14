@@ -1,5 +1,6 @@
 """Functional tests for MIDI export: the file must parse and carry the
 expected notes, tempo, and instrument assignments."""
+
 import os
 
 import pretty_midi

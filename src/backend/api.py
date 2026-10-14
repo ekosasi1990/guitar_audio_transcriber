@@ -1,25 +1,38 @@
-import logging
 import os
 import uuid
 import shutil
 import tempfile
+import io
+import math
+import librosa
+import soundfile as sf
+from copy import deepcopy
 from datetime import datetime
-from typing import Dict, List
-from fastapi import FastAPI, File, HTTPException, UploadFile, Form
+from typing import Dict, Literal
+from fastapi import FastAPI, File, HTTPException, UploadFile, Form, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from .audio_processing.quantization import fit_rhythm, auto_fit_rhythm
+from .audio_processing.tempo_estimation import estimate_note_tempo, repeated_pattern
+from .audio_processing.playing_confirmation import confirm_playing
 
 from .audio_processing import (
     load_audio,
-    detect_onsets,
-    detect_pitches,
     estimate_tempo,
     quantize_notes,
     export_midi,
 )
 from .editor import generate_accompaniment
 from .sheet_music import notes_to_musicxml, notes_to_tab
+from .sheet_music.fingering import tablature_events
+from .audio_processing.transcription import transcribe_audio
+from .models import (
+    NoteEdit,
+    AccompanimentRequest,
+    RhythmFit,
+    TimingSettings,
+    TempoChange,
+)
 from .playback import render_synced_audio
 
 app = FastAPI(title="Guitar Audio Transcriber API")
@@ -36,25 +49,18 @@ UPLOAD_DIR = tempfile.mkdtemp(prefix="gat_uploads_")
 OUTPUT_DIR = os.path.join(UPLOAD_DIR, "exports")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 RECORDINGS_DIR = os.path.join(REPO_ROOT, "recordings")
 
 # In-memory project store
 PROJECTS: Dict[str, dict] = {}
 
 
-class NoteEdit(BaseModel):
-    track: str
-    old_pitch: int
-    old_start: float
-    new_pitch: int
-    new_start: float
-    new_end: float
-    new_velocity: int
-
-
-class AccompanimentRequest(BaseModel):
-    chords: List[List]  # [ [beat, "C"], ... ]
+def _get_project(project_id):
+    try:
+        return PROJECTS[project_id]
+    except KeyError:
+        raise HTTPException(404, "Project not found") from None
 
 
 @app.post("/upload")
@@ -80,84 +86,299 @@ async def upload_audio(file: UploadFile = File(...)):
     return {"project_id": project_id, "duration": len(y) / sr}
 
 
-def _run_transcription(project):
-    """Return (flat_notes, engine_name) using Basic Pitch when available."""
-    try:
-        from .audio_processing.neural_transcription import transcribe_neural
-
-        return (transcribe_neural(project["audio_path"],
-                                  y=project["y"], sr=project["sr"]),
-                "basic-pitch")
-    except Exception as exc:
-        logging.warning("Basic Pitch unavailable (%s); using DSP pipeline", exc)
-
-    y, sr = project["y"], project["sr"]
-    onsets, offsets = detect_onsets(y, sr)
-    raw_notes = detect_pitches(y, sr, onsets, offsets)
-    flat_notes = []
-    for group in raw_notes:
-        for pitch in group["pitches"]:
-            flat_notes.append({
-                "pitch": pitch,
-                "start": group["start"],
-                "end": group["end"],
-                "velocity": 80,
-            })
-    return flat_notes, "dsp"
-
-
 @app.post("/transcribe/{project_id}")
-async def transcribe(project_id: str, quantize: bool = True, q_strength: float = 1.0):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = PROJECTS[project_id]
+async def transcribe(
+    project_id: str,
+    quantize: bool = False,
+    q_strength: float = Query(1.0, ge=0, le=1),
+    mode: Literal["melody", "chords", "neural"] = "melody",
+    noise_floor: float = Query(0.3, ge=0.1, le=0.6),
+    trim: bool = False,
+    tidy: bool = False,
+    target_bpm: float | None = Query(None, ge=20, le=300),
+    subdivisions: int = Query(4, ge=2, le=8),
+    beats_per_measure: int = Query(4, ge=1, le=12),
+    recognize_patterns: bool = True,
+    string_set: Literal["all", "top", "bottom"] = "all",
+    intended_spacing: Literal["auto", "sixteenth", "eighth", "quarter"] = "auto",
+    consistent_lengths: bool = True,
+):
+    project = _get_project(project_id)
+    if subdivisions not in (2, 4, 8):
+        raise HTTPException(
+            422, "Timing grid must be 2, 4, or 8 subdivisions per beat."
+        )
     y, sr = project["y"], project["sr"]
 
-    bpm, _ = estimate_tempo(y, sr)
-    flat_notes, engine = _run_transcription(project)
+    detected_bpm, _ = estimate_tempo(y, sr)
+    flat_notes, engine = transcribe_audio(project, mode, noise_floor, string_set)
+    project["string_set"] = string_set
+    detected_bpm, pattern = estimate_note_tempo(
+        flat_notes, detected_bpm, beats_per_measure
+    )
+    project["detected_bpm"] = detected_bpm
+    project["detected_pattern"] = pattern
+    bpm = target_bpm or detected_bpm
+    offset = min((n["start"] for n in flat_notes), default=0) if trim else 0
+    project["audio_offset"] = offset
+    project["timing_changed"] = False
+    flat_notes = [
+        {**n, "start": max(0, n["start"] - offset), "end": n["end"] - offset}
+        for n in flat_notes
+    ]
 
     if quantize:
         flat_notes = quantize_notes(flat_notes, bpm, strength=q_strength)
 
     project["bpm"] = bpm
     project["tracks"]["Guitar"] = flat_notes
+    project.pop("rhythm", None)
+    project.pop("rhythm_undo", None)
+    project["performed_notes"] = deepcopy(flat_notes)
+    if tidy:
+        _apply_automatic(
+            project,
+            TimingSettings(
+                bpm=bpm,
+                subdivisions=subdivisions,
+                beats_per_measure=beats_per_measure,
+                recognize_patterns=recognize_patterns,
+                intended_spacing=intended_spacing,
+                consistent_lengths=consistent_lengths,
+            ),
+        )
 
     return {
         "project_id": project_id,
         "bpm": bpm,
         "engine": engine,
-        "tracks": {"Guitar": flat_notes},
+        "tracks": project["tracks"],
+        "rhythm": project.get("rhythm"),
+        "can_undo_rhythm": "rhythm_undo" in project,
+        "audio_offset": offset,
+        "detected_bpm": detected_bpm,
+        "tablature": tablature_events(project["tracks"].get("Guitar", []), string_set),
     }
+
+
+@app.post("/live")
+async def live_notes(
+    file: UploadFile = File(...),
+    mode: Literal["melody", "chords"] = "melody",
+    noise_floor: float = Query(0.3, ge=0.1, le=0.6),
+    string_set: Literal["all", "top", "bottom"] = "all",
+    window_offset: float = Query(0, ge=0),
+    playing_started: bool = False,
+):
+    """Analyze a bounded PCM preview without creating projects or saving files."""
+    data = await file.read(2_000_001)
+    if len(data) > 2_000_000:
+        raise HTTPException(413, "Live preview must be at most six seconds.")
+    try:
+        y, rate = sf.read(io.BytesIO(data), dtype="float32")
+    except Exception as exc:
+        raise HTTPException(422, "Live preview requires WAV audio.") from exc
+    if len(y) / rate > 6:
+        raise HTTPException(413, "Live preview must be at most six seconds.")
+    if y.ndim > 1:
+        y = y.mean(axis=1)
+    if rate != 22050:
+        y = librosa.resample(y, orig_sr=rate, target_sr=22050)
+    notes, engine = transcribe_audio(
+        {"y": y, "sr": 22050}, mode, noise_floor, string_set
+    )
+    # The left edge can imitate a fresh attack; the right edge lacks enough
+    # sustain to resolve a chord. Later overlapping snapshots analyze both.
+    analysis_start = 0.25 if window_offset > 0 else 0
+    analysis_end = max(0, len(y) / 22050 - (0.28 if mode == "chords" else 0.17))
+    notes = [n for n in notes if analysis_start <= n["start"] <= analysis_end]
+    confirmation = confirm_playing(y, 22050, notes)
+    if not playing_started and confirmation["playing_confirmed"]:
+        notes = [n for n in notes if n["start"] >= confirmation["music_start"] - 0.03]
+    elif not playing_started:
+        notes = []
+    return {
+        "notes": notes,
+        "engine": engine,
+        "tablature": tablature_events(notes, string_set),
+        "analysis_start": analysis_start,
+        "analysis_end": analysis_end,
+        **confirmation,
+    }
+
+
+@app.get("/tempo/{project_id}")
+async def detected_tempo(project_id: str):
+    project = _get_project(project_id)
+    if "detected_bpm" in project:
+        return {
+            "bpm": project["detected_bpm"],
+            "pattern": project.get("detected_pattern"),
+        }
+    bpm, _ = estimate_tempo(project["y"], project["sr"])
+    bpm, pattern = estimate_note_tempo(project.get("performed_notes", []), bpm)
+    return {"bpm": bpm, "pattern": pattern}
+
+
+def _apply_automatic(project, settings):
+    project["rhythm_undo"] = deepcopy(
+        {k: project.get(k) for k in ("tracks", "bpm", "rhythm")}
+    )
+    source = project.get("performed_notes", project["tracks"].get("Guitar", []))
+    notes = (
+        auto_fit_rhythm(
+            source,
+            settings.bpm,
+            settings.subdivisions,
+            settings.beats_per_measure,
+            settings.recognize_patterns,
+            settings.intended_spacing,
+            settings.consistent_lengths,
+        )
+        if settings.automatic
+        else deepcopy(source)
+    )
+    project["tracks"]["Guitar"] = notes
+    project["bpm"] = settings.bpm
+    project["rhythm"] = (
+        {
+            "mode": "auto",
+            "beats_per_measure": settings.beats_per_measure,
+            "subdivisions": settings.subdivisions,
+            "intended_spacing": settings.intended_spacing,
+            "consistent_lengths": settings.consistent_lengths,
+            "pattern": (
+                repeated_pattern(source, settings.beats_per_measure)
+                if settings.recognize_patterns and settings.intended_spacing == "auto"
+                else None
+            ),
+            "measures": max(
+                1,
+                math.ceil(
+                    max(
+                        (
+                            n["start"] * settings.bpm / 60
+                            + n.get("beat_duration", 0.25)
+                            for n in notes
+                        ),
+                        default=0,
+                    )
+                    / settings.beats_per_measure
+                ),
+            ),
+        }
+        if settings.automatic
+        else None
+    )
+
+
+@app.post("/timing/{project_id}")
+async def timing(project_id: str, settings: TimingSettings):
+    project = _get_project(project_id)
+    _apply_automatic(project, settings)
+    return await get_tracks(project_id)
+
+
+@app.post("/tempo/{project_id}")
+async def change_tempo(project_id: str, settings: TempoChange):
+    project = _get_project(project_id)
+    ratio = project["bpm"] / settings.bpm
+    for notes in project["tracks"].values():
+        for n in notes:
+            n["start"] *= ratio
+            n["end"] *= ratio
+    for n in project.get("performed_notes", []):
+        n["start"] *= ratio
+        n["end"] *= ratio
+    project["bpm"] = settings.bpm
+    project["timing_changed"] = not math.isclose(ratio, 1.0) or project.get(
+        "timing_changed", False
+    )
+    project.pop("rhythm_undo", None)
+    return await get_tracks(project_id)
 
 
 @app.post("/recordings")
 async def save_recording(file: UploadFile = File(...), name: str = Form("")):
     """Save a recorded take into the repo's recordings/ dir for tuning."""
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
-    base = os.path.basename(name) if name else datetime.now().strftime("take-%Y%m%d-%H%M%S")
-    if not base.lower().endswith(".wav"):
-        base += ".wav"
+    extension = os.path.splitext(file.filename or "take.wav")[1].lower()
+    if extension not in (".wav", ".mp3"):
+        raise HTTPException(422, "Recordings must be WAV or MP3 audio.")
+    data = await file.read()
+    try:
+        sf.info(io.BytesIO(data))
+    except Exception as exc:
+        raise HTTPException(422, "The recording could not be read as audio.") from exc
+    base = (
+        os.path.basename(name)
+        if name
+        else datetime.now().strftime("take-%Y%m%d-%H%M%S-%f")
+    )
+    if not base.lower().endswith(extension):
+        base += extension
     path = os.path.join(RECORDINGS_DIR, base)
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # Preserve previous takes even when the caller requests an existing name.
+    try:
+        with open(path, "xb") as f:
+            f.write(data)
+    except FileExistsError:
+        stem, extension = os.path.splitext(base)
+        base = f"{stem}-{uuid.uuid4().hex[:8]}{extension}"
+        path = os.path.join(RECORDINGS_DIR, base)
+        with open(path, "xb") as f:
+            f.write(data)
     return {"path": path, "filename": base}
 
 
 @app.get("/tracks/{project_id}")
 async def get_tracks(project_id: str):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = _get_project(project_id)
     return {
-        "bpm": PROJECTS[project_id]["bpm"],
-        "tracks": PROJECTS[project_id]["tracks"],
+        "bpm": project["bpm"],
+        "tracks": project["tracks"],
+        "rhythm": project.get("rhythm"),
+        "can_undo_rhythm": "rhythm_undo" in project,
+        "tablature": tablature_events(
+            project["tracks"].get("Guitar", []),
+            project.get("string_set", "all"),
+        ),
+        "timing_changed": project.get("timing_changed", False),
     }
+
+
+@app.post("/rhythm/{project_id}")
+async def apply_rhythm(project_id: str, settings: RhythmFit):
+    project = _get_project(project_id)
+    if set(project["tracks"]) != {"Guitar"}:
+        raise HTTPException(422, "Fit the guitar rhythm before adding accompaniment.")
+    try:
+        notes = fit_rhythm(project["tracks"]["Guitar"], **settings.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    project["rhythm_undo"] = deepcopy(
+        {k: project.get(k) for k in ("tracks", "bpm", "rhythm")}
+    )
+    project["tracks"]["Guitar"] = notes
+    project["bpm"] = settings.bpm
+    project["rhythm"] = settings.model_dump()
+    return await get_tracks(project_id)
+
+
+@app.post("/rhythm/{project_id}/undo")
+async def undo_rhythm(project_id: str):
+    project = _get_project(project_id)
+    previous = project.pop("rhythm_undo", None)
+    if previous is None:
+        raise HTTPException(422, "No rhythm fit to undo.")
+    project.update(previous)
+    return await get_tracks(project_id)
 
 
 @app.post("/edit/{project_id}")
 async def edit_note(project_id: str, edit: NoteEdit):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    tracks = PROJECTS[project_id]["tracks"]
+    project = _get_project(project_id)
+    tracks = project["tracks"]
     if edit.track not in tracks:
         raise HTTPException(status_code=404, detail="Track not found")
 
@@ -167,27 +388,28 @@ async def edit_note(project_id: str, edit: NoteEdit):
             n["start"] = edit.new_start
             n["end"] = edit.new_end
             n["velocity"] = edit.new_velocity
+            n.pop("beat_duration", None)
             break
+    project.pop("rhythm_undo", None)
+    project["performed_notes"] = deepcopy(tracks.get("Guitar", []))
     return {"status": "updated", "tracks": tracks}
 
 
 @app.post("/accompaniment/{project_id}")
 async def add_accompaniment(project_id: str, req: AccompanimentRequest):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    bpm = PROJECTS[project_id]["bpm"]
-    duration = len(PROJECTS[project_id]["y"]) / PROJECTS[project_id]["sr"]
+    project = _get_project(project_id)
+    bpm = project["bpm"]
+    duration = len(project["y"]) / project["sr"]
     accompaniment = generate_accompaniment(req.chords, bpm, duration)
-    PROJECTS[project_id]["accompaniment"] = accompaniment
-    PROJECTS[project_id]["tracks"].update(accompaniment)
-    return {"status": "ok", "tracks": PROJECTS[project_id]["tracks"]}
+    project["accompaniment"] = accompaniment
+    project["tracks"].update(accompaniment)
+    project.pop("rhythm_undo", None)
+    return {"status": "ok", "tracks": project["tracks"]}
 
 
 @app.post("/export/{project_id}")
 async def export_midi_endpoint(project_id: str, filename: str = "export.mid"):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = PROJECTS[project_id]
+    project = _get_project(project_id)
     safe_name = os.path.basename(filename)
     output_path = os.path.join(OUTPUT_DIR, f"{project_id}_{safe_name}")
     instruments = {"Guitar": 25}
@@ -196,28 +418,54 @@ async def export_midi_endpoint(project_id: str, filename: str = "export.mid"):
 
 
 @app.get("/sheet/{project_id}")
-async def generate_sheet(project_id: str, format: str = "musicxml"):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = PROJECTS[project_id]
+async def generate_sheet(
+    project_id: str, format: str = "musicxml", download: bool = False
+):
+    project = _get_project(project_id)
     if format == "musicxml":
         path = os.path.join(OUTPUT_DIR, f"{project_id}_sheet.xml")
-        notes_to_musicxml(project["tracks"], project["bpm"], path)
+        notes_to_musicxml(
+            project["tracks"],
+            project["bpm"],
+            path,
+            (project.get("rhythm") or {}).get("beats_per_measure", 4),
+        )
     else:
         path = os.path.join(OUTPUT_DIR, f"{project_id}_tab.xml")
         guitar_notes = project["tracks"].get("Guitar", [])
-        notes_to_tab(guitar_notes, project["bpm"], path)
+        notes_to_tab(
+            guitar_notes,
+            project["bpm"],
+            path,
+            (project.get("rhythm") or {}).get("beats_per_measure", 4),
+            project.get("string_set", "all"),
+        )
+    if download:
+        return FileResponse(
+            path,
+            media_type="application/vnd.recordare.musicxml+xml",
+            filename="tablature.musicxml" if format == "tab" else "sheet.musicxml",
+        )
     return {"sheet_path": path}
 
 
 @app.post("/playback/{project_id}")
-async def generate_playback(project_id: str, mix_ratio: float = 0.4):
-    if project_id not in PROJECTS:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = PROJECTS[project_id]
+async def generate_playback(project_id: str, mix_ratio: float = Query(1.0, ge=0, le=1)):
+    project = _get_project(project_id)
+    if (project.get("rhythm") or project.get("timing_changed")) and mix_ratio < 1:
+        raise HTTPException(
+            422,
+            "Use notes-only playback after fitting rhythm; the original audio keeps its performed timing.",
+        )
     midi_path = os.path.join(OUTPUT_DIR, f"{project_id}_playback.mid")
     instruments = {"Guitar": 25}
     export_midi(project["tracks"], project["bpm"], instruments, midi_path)
     output_path = os.path.join(OUTPUT_DIR, f"{project_id}_mixed.wav")
-    render_synced_audio(project["audio_path"], midi_path, output_path, mix_ratio)
+    render_synced_audio(
+        project["audio_path"],
+        midi_path,
+        output_path,
+        mix_ratio,
+        original_offset=project.get("audio_offset", 0),
+    )
     return FileResponse(output_path, media_type="audio/wav", filename="playback.wav")

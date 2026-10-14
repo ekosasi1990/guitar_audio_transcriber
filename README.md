@@ -1,184 +1,140 @@
 # Guitar Audio Transcriber
 
-A desktop application that converts MP3 and WAV guitar recordings into editable MIDI note events using polyphonic pitch detection, onset analysis, tempo estimation, and rhythmic quantization.
+A local desktop app for turning guitar recordings into editable notes and
+playable tablature. Open a WAV or MP3, or record through a microphone, then
+review the notes, adjust the rhythm, and export MIDI or MusicXML.
 
-## Features
+I started this after picking up guitar. I wanted a way to write down tunes I
+improvised and work out guitar clips that did not include tabs.
 
-- **Audio Processing Pipeline**: Load MP3/WAV guitar recordings and extract polyphonic notes using onset detection and pitch tracking.
-- **Multitrack Editor**: Modify note pitch, timing, duration, tempo, and instrument assignments.
-- **Accompaniment**: Automatically add drum, bass, and keyboard accompaniment tracks.
-- **Playback**: Synchronized audio playback with the generated MIDI timeline.
-- **Notation**: Sheet music and guitar tablature generation with MusicXML / MIDI export.
-- **MIDI Export**: Export edited notes and accompaniment to standard `.mid` files.
+## Setup and launch
 
-## Architecture
-
-- **Backend**: Python 3.11+ (FastAPI, librosa, pretty_midi, music21, soundfile)
-- **Frontend**: Electron desktop application (HTML5 canvas, vanilla JavaScript)
-- **Communication**: REST API between the Electron frontend and the Python backend
-
-## Getting Started
-
-### One-time setup (Windows)
-
-Double-click `setup.bat` or run in Command Prompt:
+Install Python 3.11 or newer and Node.js 20 or newer. On Windows:
 
 ```cmd
 setup.bat
-```
-
-This installs Python and Node dependencies. To install into a virtual
-environment instead of the system Python:
-
-```cmd
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install -r requirements.txt
-npm install
-```
-
-> **Python 3.13+ note:** `pydub` (used only for MP3 import) relies on the
-> `audioop` stdlib module that was removed in Python 3.13. The `audioop-lts`
-> backport is installed automatically via `requirements.txt`. MP3 decoding
-> additionally requires `ffmpeg` on PATH; WAV files need neither.
-
-### Neural transcription (recommended)
-
-By default the app transcribes with **Spotify Basic Pitch** (polyphonic
-neural model, ONNX runtime — no GPU needed). If it isn't installed, the app
-silently falls back to a much weaker onset+piptrack DSP pipeline.
-
-```cmd
-python -m pip install -r requirements-ml.txt
-python -m pip install --no-deps basic-pitch
-```
-
-(`--no-deps` is required because upstream `basic-pitch` pins `numpy<1.24`,
-which cannot build on Python 3.13+; the code itself works fine with newer
-numpy.)
-
-### Launch the app (Windows)
-
-Double-click `start.bat` or run in Command Prompt:
-
-```cmd
 start.bat
 ```
 
-This opens two windows: the FastAPI backend and the Electron frontend.
+Setup creates `.venv` and installs the Python and desktop dependencies. The
+launcher starts the local audio service and opens Electron. You can create a
+desktop shortcut to `start.bat`; keep the batch file in the project folder.
 
-### Manual start
-
-If you prefer to start manually:
+For manual setup:
 
 ```cmd
-python -m uvicorn src.backend.api:app --reload
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+npm ci
 ```
 
-(or, inside the venv: `.venv\Scripts\python -m uvicorn src.backend.api:app`)
-
-And in another Command Prompt:
+For development, run these in separate terminals:
 
 ```cmd
+.venv\Scripts\python -m uvicorn src.backend.api:app --reload
 npm start
 ```
 
-The interactive API docs are available at `http://127.0.0.1:8000/docs`.
+The API documentation is at `http://127.0.0.1:8000/docs`. MP3 decoding needs
+FFmpeg on PATH; WAV files work without it. Python 3.13+ uses `audioop-lts` for
+pydub compatibility, installed by the requirements file.
 
-## Running the tests
+## Using the app
 
-```cmd
-python -m pip install -r requirements-dev.txt
-python -m pytest tests
-```
+1. Choose single notes or chords and the strings you are playing.
+2. Open a recording or press Record. Recording waits for a clear musical
+   phrase, keeps the first pluck from the buffer, and shows provisional notes.
+3. Review the tab or note graph. Scroll, zoom, or click the sheet to seek.
+   The scroll slider stays below the sheet; Follow live returns to recording.
+4. Adjust Target BPM. Under Advanced, apply rhythm settings, edit individual
+   notes, or compare the original recording with the transcription.
+5. Play the result or download MIDI, sheet music, or tablature. MusicXML files
+   open in a notation editor; the app displays its own tab and note timeline.
 
-Tests use deterministic synthetic WAV fixtures (pure tones with known pitches
-and onsets). Functional tests live in `test_api.py`, `test_audio_processing.py`,
-and `test_midi_export.py`. `test_accuracy.py` is marked `accuracy` and is a
-loose regression benchmark, not a correctness gate:
+Save recording locally writes to this project's `recordings/` folder. Imported
+files keep their original format; microphone takes are WAV. Existing files
+are not overwritten, and personal recordings are excluded from Git.
 
-```cmd
-python -m pytest tests -m accuracy   # benchmark only
-python -m pytest tests -m "not accuracy"  # functional tests only
-```
+## Rhythm settings
 
-## Usage
+Automatic fitting groups similar gaps and assigns consistent beat lengths.
+Repeated notes can share their length instead of retaining uneven releases.
+Clear pauses remain. Four-attack chord blocks can fit four quarter beats per
+bar when repeated groups provide enough evidence.
 
-1. Launch the app (`start.bat` or the installed `.exe` installer).
-2. Import an MP3 / WAV file or record guitar directly with your microphone.
-3. Click **Transcribe** to detect notes.
-4. Review and edit detected notes in the multitrack editor.
-5. Add accompaniment tracks if desired.
-6. Export the result to MIDI or view sheet music / tablature.
+A sixteenth-note grid allows sixteenth-note positions; it does not mean every
+note is a sixteenth. For four attacks per beat, choose **Advanced → Intended
+spacing → Even sixteenths → Apply timing settings**. Eighth and quarter spacing
+are also available. Turn off consistent lengths to keep articulation differences.
 
-### Saving takes for tuning
+Undo restores the previous timing operation. Disabling automatic timing
+restores performed notes. Changing BPM changes playback speed, preserving beat
+positions. The original audio is not time-stretched, so mixed playback is
+unavailable after rhythm or tempo changes.
 
-After a recording stops, click **Save Take to Repo** to store the WAV under
-`recordings/` in this repository. Analyze a take and compare it with what
-was played:
+## Code
 
-```cmd
-.venv\Scripts\python tools\tune_recording.py recordings\take-YYYYMMDD-HHMMSS.wav
-```
+- `src/frontend/`: Electron window, microphone capture, sheet drawing, and controls.
+- `src/backend/api.py`: Upload, transcription, editing, playback, and export routes.
+- `src/backend/models.py`: Request validation.
+- `src/backend/audio_processing/`: Attacks, pitch detection, tempo, and rhythm.
+- `src/backend/sheet_music/`: Notation and string/fret assignment.
+- `src/backend/playback/`: MIDI synthesis and audio mixing.
+- `src/backend/editor/`: Note/track helpers and accompaniment generation.
+- `tests/`: Synthetic audio, API, notation, and local recording regression tests.
+- `tools/`: Desktop startup and recording diagnostics.
 
-It prints the detected onsets, every note event (onset, end, pitch, name,
-confidence), and a BPM estimate. Optionally pass an `expected.json`
-(`[{"pitch": 40, "start": 0.5}, ...]`) to get matched/missed/extra counts.
+See [architecture](docs/architecture.md) for the data flow and
+[interview preparation](docs/interview-guide.md) for a demo plan and technical explanations.
 
-### Onset vs. sustain
-
-The pipeline treats a note start (attack) and its ringing tail (sustain)
-as separate concepts:
-
-- Basic Pitch thresholds are tuned so only real pluck attacks create
-  note starts, and the decaying sustain cannot hold spurious harmonic
-  pitches open (`onset_threshold=0.6`, `frame_threshold=0.4`).
-- Same-pitch events that abut are kept only when a librosa-detected onset
-  exists at the seam — otherwise they are re-joined (the model split a
-  sustained note internally). A fused note is split at an onset when the
-  note's own frequency band gains energy there (a re-pluck).
-
-Practical tips when recording for tuning: palm-mute or fret-mute strings
-after each note to shorten sustain, mute unused strings, and use a clean
-amp sound — heavy distortion/resonance is the hardest input for any
-transcriber.
-
-## Known limitations
-
-- **Transcription quality depends on the engine.** With Basic Pitch installed
-  (see setup), polyphonic note detection is quite good for solo guitar. The
-  built-in DSP fallback (onset detection + `librosa.piptrack`) works only on
-  clean monophonic material and produces spurious partials on real recordings.
-  No source separation is performed — mixed-instrument audio is not supported.
-- **Playback synthesis is crude** — the fallback synthesizer is a simple
-  additive synth. Install FluidSynth + a General MIDI soundfont for better
-  playback sound.
-- **DSP fallback misses pitches below ~150 Hz** (`piptrack` floor is 75 Hz but
-  reliable detection needs ~150+); Basic Pitch does not have this limitation.
-- **Tempo estimation is unreliable** on rubato or atypical audio; it falls
-  back to 120 BPM when the tracker fails, which also affects quantization and
-  note durations in notation export.
-- **MP3 import** requires `pydub` + `ffmpeg`. WAV works with no extra setup.
-- **Playback mixing** uses FluidSynth when a soundfont is installed; otherwise
-  it falls back to a built-in additive synthesizer (crude sine-based sound).
-- **Sheet/tablature export** writes a single un-measured part; rhythms are
-  snapped to the nearest notatable value. Tablature carries string/fret
-  technical annotations but is not a full tab staff layout.
-- **In-memory project store**: projects are lost on backend restart, and there
-  is no authentication — the API listens on localhost only.
-
-## Building a Windows Installer
-
-To create a single `.exe` installer that bundles both the Python backend and the Electron frontend:
+## Checks
 
 ```cmd
-build-all.bat
+.venv\Scripts\python -m pytest tests
+npm run test:recorder
+.venv\Scripts\python -m black --check src tests tools backend_launcher.py
+npm run check:frontend
 ```
 
-This produces a `dist/Guitar Audio Transcriber Setup.exe` installer. The installer includes a `dist-backend/gat-backend/gat-backend.exe` which the frontend launches automatically on startup.
+Format Python with Black and frontend files with `npm run format:frontend`.
+CI checks formatting, Python tests, JavaScript syntax, and recorder behavior.
+The Node lockfile is committed so `npm ci` uses the same desktop dependencies.
 
-Because the backend includes audio / ML libraries, the installed app will be several hundred MB. The build excludes unused GUI toolkits (`tkinter`, `PyQt*`, `PySide*`, `wx`) to keep it as small as possible.
+Local reference tests use `smooth.wav` and `rough.wav` (32 single-note attacks
+each) and `mitski.wav` (64 dyad attacks, 128 pitches). These files are not
+published; reference tests skip if they are missing. Synthetic fixtures still
+run on a clean checkout. These checks establish correctness on those cases,
+not an accuracy percentage across arbitrary songs.
 
-## License
+## Optional model and builds
 
-MIT
+The default detectors use librosa, NumPy, and SciPy. Basic Pitch is an optional
+polyphonic engine under Advanced:
+
+```cmd
+.venv\Scripts\python -m pip install -r requirements-ml.txt
+.venv\Scripts\python -m pip install --no-deps basic-pitch
+```
+
+The separate requirements avoid older Basic Pitch NumPy pins. Model packaging
+can vary by Python version; the core app works without the model.
+
+`build-all.bat` runs the PyInstaller backend and electron-builder Windows
+installer builds. Installed packaging needs separate validation from running
+the source checkout.
+
+## Limits
+
+- Best suited to isolated guitar. It does not separate a guitar from vocals or
+  backing tracks. Dense chords and distortion need broader evaluation.
+- Live notes are provisional. Full-take analysis after Stop has more context.
+- Intent, BPM beat interpretation, and string choice can be ambiguous. Rhythm
+  and string settings are user constraints, not guaranteed recovery of intent.
+- Standard tuning and frets 0–24 are assumed. Several strings can play the same
+  pitch; the selected strings constrain a playable fingering.
+- Projects are held in memory and disappear when the audio service restarts.
+- Triplet/swing grids are not implemented. The fallback synth approximates a
+  plucked guitar; it does not reproduce the original performance's timbre.
+- Accompaniment generation is retained in the backend, with its UI hidden.
+
+MIT license. External libraries and models retain their own licenses.

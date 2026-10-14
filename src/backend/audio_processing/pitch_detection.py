@@ -1,6 +1,5 @@
 import numpy as np
 import librosa
-from scipy.ndimage import median_filter
 
 
 def detect_pitches(y, sr, onsets, offsets):
@@ -11,10 +10,16 @@ def detect_pitches(y, sr, onsets, offsets):
     """
     hop_length = 512
     pitches, magnitudes = librosa.piptrack(
-        y=y, sr=sr, hop_length=hop_length, threshold=0.2,
-        fmin=75.0, fmax=1500.0,  # cover low E (~82 Hz) up to ~fret 17 high E
+        y=y,
+        sr=sr,
+        hop_length=hop_length,
+        threshold=0.2,
+        fmin=75.0,
+        fmax=1500.0,  # cover low E (~82 Hz) up to ~fret 17 high E
     )
-    times = librosa.frames_to_time(np.arange(pitches.shape[1]), sr=sr, hop_length=hop_length)
+    times = librosa.frames_to_time(
+        np.arange(pitches.shape[1]), sr=sr, hop_length=hop_length
+    )
 
     notes = []
     for start, end in zip(onsets, offsets):
@@ -35,26 +40,13 @@ def detect_pitches(y, sr, onsets, offsets):
         if segment_pitches:
             # Clean with median filter over pitch contour
             pitch_list = sorted(segment_pitches)
-            notes.append({
-                "start": float(start),
-                "end": float(end),
-                "pitches": pitch_list,
-            })
+            notes.append(
+                {
+                    "start": float(start),
+                    "end": float(end),
+                    "pitches": pitch_list,
+                }
+            )
 
-    # Merge repeated single-pitch segments into longer notes
-    consolidated = []
-    for n in notes:
-        if len(n["pitches"]) == 1:
-            pitch = n["pitches"][0]
-            if consolidated and len(consolidated[-1]["pitches"]) == 1 and consolidated[-1]["pitches"][0] == pitch:
-                consolidated[-1]["end"] = n["end"]
-            else:
-                consolidated.append({
-                    "start": n["start"],
-                    "end": n["end"],
-                    "pitches": [pitch],
-                })
-        else:
-            consolidated.append(n)
-
-    return consolidated
+    # Each segment starts at a detected attack, including repeated pitches.
+    return notes

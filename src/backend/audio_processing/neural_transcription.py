@@ -3,6 +3,7 @@
 basic-pitch is an optional dependency; transcribe_neural raises ImportError
 when it is not installed so callers can fall back to the DSP pipeline.
 """
+
 import logging
 
 _model = None
@@ -19,9 +20,16 @@ def _get_model():
     return _model
 
 
-def transcribe_neural(audio_path, min_freq=75.0, max_freq=1500.0,
-                      onset_threshold=0.6, frame_threshold=0.4,
-                      minimum_note_length=140.0, y=None, sr=None):
+def transcribe_neural(
+    audio_path,
+    min_freq=75.0,
+    max_freq=1500.0,
+    onset_threshold=0.6,
+    frame_threshold=0.4,
+    minimum_note_length=140.0,
+    y=None,
+    sr=None,
+):
     """Return flat note dicts [{pitch, start, end, velocity}] for audio_path.
 
     Thresholds are tuned for picked guitar: a higher onset threshold means
@@ -35,6 +43,7 @@ def transcribe_neural(audio_path, min_freq=75.0, max_freq=1500.0,
 
     if y is None or sr is None:
         from .loader import load_audio
+
         y, sr = load_audio(audio_path)
 
     _, _, note_events = predict(
@@ -51,12 +60,14 @@ def transcribe_neural(audio_path, min_freq=75.0, max_freq=1500.0,
     for start_s, end_s, pitch, confidence, _bends in note_events:
         if end_s <= start_s:
             continue
-        notes.append({
-            "pitch": int(round(pitch)),
-            "start": float(start_s),
-            "end": float(end_s),
-            "velocity": max(1, min(127, int(round(confidence * 127)))),
-        })
+        notes.append(
+            {
+                "pitch": int(round(pitch)),
+                "start": float(start_s),
+                "end": float(end_s),
+                "velocity": max(1, min(127, int(round(confidence * 127)))),
+            }
+        )
     notes = _merge_retriggered(notes)
     return split_rearticulated(notes, y, sr)
 

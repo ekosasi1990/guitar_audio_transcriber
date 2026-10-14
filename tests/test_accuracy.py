@@ -5,6 +5,7 @@ melody. The threshold is intentionally loose; this test exists to track the
 transcription quality trend and catch regressions, not to define correctness.
 Run only these benchmarks with:  pytest -m accuracy
 """
+
 import numpy as np
 import pytest
 

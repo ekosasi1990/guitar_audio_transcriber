@@ -10,7 +10,9 @@ process.on('uncaughtException', (err) => {
   try {
     const logPath = path.join(app.getPath('userData'), 'gat-error.log');
     fs.appendFileSync(logPath, `${new Date().toISOString()} ${err.stack}\n`);
-  } catch (_) { /* ignore logging failure */ }
+  } catch (_) {
+    /* ignore logging failure */
+  }
 });
 
 function findBackend() {
@@ -46,8 +48,9 @@ function waitForBackend(callback) {
       return;
     }
     attempts++;
-    const req = http.get(API_URL, (res) => {
-      callback(res.statusCode < 500);
+    const req = http.get(`${API_URL}/openapi.json`, (res) => {
+      res.resume();
+      callback(res.statusCode === 200);
     });
     req.on('error', () => setTimeout(check, 500));
     req.setTimeout(1000, () => req.destroy());
@@ -81,11 +84,12 @@ startBackend();
 
 app.whenReady().then(() => {
   waitForBackend((ok) => {
-    if (ok) createWindow();
-    else {
-      createWindow();
-      console.warn('Backend not detected. Start it manually with python -m uvicorn src.backend.api:app');
+    if (!ok) {
+      console.warn(
+        'Backend not detected. Start it manually with python -m uvicorn src.backend.api:app',
+      );
     }
+    createWindow();
   });
 });
 

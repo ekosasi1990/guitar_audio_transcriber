@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -20,6 +19,8 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Smoke test
         run: python -c "import src.backend.api"
+      - name: Check formatting
+        run: python -m black --check src tests tools backend_launcher.py
       - name: Run tests
         run: python -m pytest tests -q
 
@@ -31,6 +32,14 @@ jobs:
         with:
           node-version: '20'
       - name: Install dependencies
-        run: npm install
-      - name: Electron smoke check
-        run: npx electron --version
+        run: npm ci
+      - name: Check JavaScript syntax
+        run: |
+          node --check src/frontend/main.js
+          node --check src/frontend/preload.js
+          node --check src/frontend/js/app.js
+          node --check src/frontend/js/recorder.js
+      - name: Check formatting
+        run: npm run check:frontend
+      - name: Check recorder
+        run: node tests/recorder_checks.cjs

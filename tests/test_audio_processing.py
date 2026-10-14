@@ -4,6 +4,7 @@ These use deterministic synthetic signals (pure sine tones with known pitch
 and timing) — they verify the pipeline runs and produces structurally correct
 output. They are NOT accuracy benchmarks; see test_accuracy.py for those.
 """
+
 import numpy as np
 
 from src.backend.audio_processing import (
@@ -111,7 +112,7 @@ def test_chord_to_midi_qualities():
 
 def test_find_string_and_fret():
     tunings = [64, 59, 55, 50, 45, 40]
-    assert find_string_and_fret(64, tunings) == (0, 0)   # open high E
-    assert find_string_and_fret(40, tunings) == (5, 0)   # open low E
-    assert find_string_and_fret(65, tunings) == (0, 1)   # F on high E
+    assert find_string_and_fret(64, tunings) == (0, 0)  # open high E
+    assert find_string_and_fret(40, tunings) == (5, 0)  # open low E
+    assert find_string_and_fret(65, tunings) == (0, 1)  # F on high E
     assert find_string_and_fret(30, tunings) == (None, None)  # out of range

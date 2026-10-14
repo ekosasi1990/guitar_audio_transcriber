@@ -2,6 +2,7 @@
 
 Skipped when basic-pitch is not installed (it is an optional dependency).
 """
+
 import pytest
 
 pytest.importorskip("basic_pitch")
@@ -37,11 +38,9 @@ def test_repluck_while_ringing_is_two_onsets(replucks_wav):
     """Re-plucking a still-ringing string is a new onset, not sustain:
     two separate note events, not one fused note."""
     notes = transcribe_neural(replucks_wav)
-    at_64 = sorted((n for n in notes if n["pitch"] == 64),
-                   key=lambda n: n["start"])
+    at_64 = sorted((n for n in notes if n["pitch"] == 64), key=lambda n: n["start"])
     assert len(at_64) >= 2
     assert abs(at_64[0]["start"] - 0.10) < 0.15
     assert abs(at_64[1]["start"] - 0.80) < 0.15
     # The second attack's start is the first attack's end.
     assert abs(at_64[0]["end"] - at_64[1]["start"]) < 0.15
-

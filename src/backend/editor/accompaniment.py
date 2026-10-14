@@ -1,12 +1,23 @@
-import numpy as np
-
-
 def chord_to_midi(chord_name):
     """Very simple mapping from chord name to a set of MIDI pitches."""
     base = {
-        "C": 48, "C#": 49, "Db": 49, "D": 50, "D#": 51, "Eb": 51,
-        "E": 52, "F": 53, "F#": 54, "Gb": 54, "G": 55, "G#": 56,
-        "Ab": 56, "A": 57, "A#": 58, "Bb": 58, "B": 59,
+        "C": 48,
+        "C#": 49,
+        "Db": 49,
+        "D": 50,
+        "D#": 51,
+        "Eb": 51,
+        "E": 52,
+        "F": 53,
+        "F#": 54,
+        "Gb": 54,
+        "G": 55,
+        "G#": 56,
+        "Ab": 56,
+        "A": 57,
+        "A#": 58,
+        "Bb": 58,
+        "B": 59,
     }
     if len(chord_name) > 1 and chord_name[1] in ("#", "b"):
         root, quality = chord_name[:2], chord_name[2:]
@@ -39,26 +50,34 @@ def generate_accompaniment(chords, bpm, total_duration):
         bass_pitch = chord_pitches[0] - 24
 
         # Bass quarter note
-        notes["Bass"].append({"pitch": bass_pitch, "start": start, "end": end, "velocity": 90})
+        notes["Bass"].append(
+            {"pitch": bass_pitch, "start": start, "end": end, "velocity": 90}
+        )
 
         # Keyboard chord
         for p in chord_pitches:
-            notes["Keyboard"].append({"pitch": p, "start": start, "end": start + 4 * spb, "velocity": 70})
+            notes["Keyboard"].append(
+                {"pitch": p, "start": start, "end": start + 4 * spb, "velocity": 70}
+            )
 
         # Simple drum pattern
         for sub in range(4):
-            notes["Drums"].append({
-                "pitch": 36,
-                "start": start + sub * (spb / 4),
-                "end": start + sub * (spb / 4) + 0.05,
-                "velocity": 100 if sub == 0 else 60,
-            })
-            if sub % 2 == 1:
-                notes["Drums"].append({
-                    "pitch": 42,
+            notes["Drums"].append(
+                {
+                    "pitch": 36,
                     "start": start + sub * (spb / 4),
                     "end": start + sub * (spb / 4) + 0.05,
-                    "velocity": 70,
-                })
+                    "velocity": 100 if sub == 0 else 60,
+                }
+            )
+            if sub % 2 == 1:
+                notes["Drums"].append(
+                    {
+                        "pitch": 42,
+                        "start": start + sub * (spb / 4),
+                        "end": start + sub * (spb / 4) + 0.05,
+                        "velocity": 70,
+                    }
+                )
 
     return notes
