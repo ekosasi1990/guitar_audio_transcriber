@@ -11,7 +11,11 @@ class Track:
         self.notes.append(note)
 
     def remove_note(self, pitch, start):
-        self.notes = [n for n in self.notes if not (n.pitch == pitch and abs(n.start - start) < 0.001)]
+        self.notes = [
+            n
+            for n in self.notes
+            if not (n.pitch == pitch and abs(n.start - start) < 0.001)
+        ]
 
     def update_note(self, old_pitch, old_start, **kwargs):
         for n in self.notes:

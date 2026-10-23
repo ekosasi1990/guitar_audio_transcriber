@@ -28,12 +28,14 @@ def export_midi(notes, bpm, instruments, output_path, accompaniment=None):
             if "drum" in name.lower():
                 inst = pretty_midi.Instrument(program=0, is_drum=True, name=name)
                 for n in track_notes:
-                    inst.notes.append(pretty_midi.Note(
-                        velocity=n.get("velocity", 80),
-                        pitch=n["pitch"],
-                        start=n["start"],
-                        end=n["end"],
-                    ))
+                    inst.notes.append(
+                        pretty_midi.Note(
+                            velocity=n.get("velocity", 80),
+                            pitch=n["pitch"],
+                            start=n["start"],
+                            end=n["end"],
+                        )
+                    )
                 pm.instruments.append(inst)
             else:
                 add_track(name, track_notes, program)

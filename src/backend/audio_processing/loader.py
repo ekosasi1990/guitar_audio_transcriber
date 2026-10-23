@@ -2,13 +2,18 @@ import os
 import tempfile
 import librosa
 import soundfile as sf
-from pydub import AudioSegment
 
 
 def load_audio(file_path: str, sr: int = 22050, mono: bool = True):
     """Load an MP3 or WAV file and return audio signal and sample rate."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".mp3":
+        try:
+            from pydub import AudioSegment
+        except ImportError as exc:
+            raise RuntimeError(
+                "MP3 support requires pydub (and, on Python 3.13+, audioop-lts)"
+            ) from exc
         audio = AudioSegment.from_mp3(file_path)
         if mono:
             audio = audio.set_channels(1)

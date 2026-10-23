@@ -1,10 +1,19 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
 const API_URL = 'http://127.0.0.1:8000';
+
+process.on('uncaughtException', (err) => {
+  try {
+    const logPath = path.join(app.getPath('userData'), 'gat-error.log');
+    fs.appendFileSync(logPath, `${new Date().toISOString()} ${err.stack}\n`);
+  } catch (_) {
+    /* ignore logging failure */
+  }
+});
 
 function findBackend() {
   const resources = process.resourcesPath;
@@ -49,6 +58,14 @@ function waitForBackend(callback) {
 }
 
 function createWindow() {
+  // Grant microphone/camera permission requests (needed for recording).
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
+    callback(permission === 'media' || permission === 'mediaKeySystem');
+  });
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => {
+    return permission === 'media' || permission === 'mediaKeySystem';
+  });
+
   const win = new BrowserWindow({
     width: 1280,
     height: 900,
@@ -69,7 +86,9 @@ app.whenReady().then(() => {
     if (ok) createWindow();
     else {
       createWindow();
-      console.warn('Backend not detected. Start it manually with python -m uvicorn src.backend.api:app');
+      console.warn(
+        'Backend not detected. Start it manually with python -m uvicorn src.backend.api:app',
+      );
     }
   });
 });
