@@ -1,4 +1,5 @@
 const API_URL = window.gtrApi ? window.gtrApi.url : 'http://127.0.0.1:8000';
+let lastTakeFilename = 'recording.wav';
 const $ = (id) => document.getElementById(id);
 const recorder = new MicRecorder();
 const canvas = $('pianoRoll'),
@@ -21,7 +22,6 @@ let lastTakeBlob = null,
   livePending = false,
   liveAbort = null,
   liveGeneration = 0;
-let lastTakeName = 'recording.wav';
 let liveOrigin = null,
   view = 'tab',
   playTime = 0,
@@ -84,6 +84,7 @@ function refreshButtons() {
   $('targetBpm').disabled = $('transcriptionMode').disabled = busy || recording;
   $('stringSet').disabled = busy || recording;
   $('seekInput').disabled = !haveNotes || recording;
+  $('playbackBpm').disabled = busy || !haveNotes || recording;
 }
 async function action(task) {
   if (busy) return;
@@ -145,6 +146,8 @@ function applyData(data) {
   canUndo = !!data.can_undo_rhythm;
   selectedNote = null;
   $('targetBpm').value = Number(bpm.toFixed(1));
+  $('playbackBpm').placeholder = String(Number(bpm.toFixed(1)));
+  applyPlaybackTempo();
   $('playbackMix').options[1].disabled = !!rhythm || !!data.timing_changed;
   if ($('playbackMix').options[1].disabled) $('playbackMix').value = '1';
   invalidatePlayback();
@@ -158,6 +161,8 @@ async function uploadFile(blob, filename) {
   form.append('file', blob, filename);
   const data = await (await request('/upload', { method: 'POST', body: form })).json();
   projectId = data.project_id;
+  lastTakeBlob = blob;
+  lastTakeFilename = filename;
   $('fileName').textContent = filename;
   audioPreview($('recordedAudio'), blob);
   await transcribe();
@@ -178,8 +183,6 @@ async function transcribe() {
     beats_per_measure: $('fitBeats').value,
     recognize_patterns: $('recognizePatterns').checked,
     string_set: $('stringSet').value,
-    intended_spacing: $('intendedSpacing').value,
-    consistent_lengths: $('consistentLengths').checked,
   });
   if (bpmOverride && $('targetBpm').value) params.set('target_bpm', $('targetBpm').value);
   const data = await (
@@ -198,9 +201,8 @@ $('audioInput').addEventListener('change', () =>
   action(async () => {
     const file = $('audioInput').files[0];
     if (!file) return;
+    lastTakeBlob = null;
     await uploadFile(file, file.name);
-    lastTakeBlob = file;
-    lastTakeName = file.name;
     $('audioInput').value = '';
   }),
 );
@@ -359,7 +361,6 @@ async function stopRecording() {
     return;
   }
   lastTakeBlob = captured;
-  lastTakeName = 'recording.wav';
   setStatus('Recording complete. Refining the full take…');
   await uploadFile(lastTakeBlob, 'recording.wav');
 }
@@ -368,7 +369,7 @@ $('saveTakeBtn').addEventListener('click', () =>
   action(async () => {
     if (!lastTakeBlob) return;
     const form = new FormData();
-    form.append('file', lastTakeBlob, lastTakeName);
+    form.append('file', lastTakeBlob, lastTakeFilename);
     const data = await (await request('/recordings', { method: 'POST', body: form })).json();
     setStatus(`Recording saved to ${data.path}`);
   }),
@@ -447,8 +448,8 @@ function drawGraph() {
         ctx.strokeStyle = '#8c9eb3';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(x + 2, y + 12);
-        ctx.lineTo(Math.max(x + 5, end - 2), y + 12);
+        ctx.moveTo(x + 12, y + 12);
+        ctx.lineTo(Math.max(x + 13, end - 2), y + 12);
         ctx.stroke();
         const label = String(position.fret),
           width = ctx.measureText(label).width + 8;
@@ -526,7 +527,9 @@ function updatePlayhead() {
   const r = layout();
   $('playhead').style.left = `${r.left + Math.min(Math.max(0, playTime), r.duration) * r.pps}px`;
   $('seekInput').value = Math.min(playTime, r.contentDuration);
-  $('playbackTime').textContent = `${timeLabel(playTime)} / ${timeLabel(r.contentDuration)}`;
+  const rate = recording ? 1 : audio.playbackRate;
+  $('playbackTime').textContent =
+    `${timeLabel(playTime / rate)} / ${timeLabel(r.contentDuration / rate)}`;
 }
 function followHead() {
   if (!$('followPlayback').checked || dragging) return;
@@ -666,6 +669,26 @@ $('stopPlaybackBtn').addEventListener('click', () => {
   viewport.scrollLeft = 0;
 });
 
+function applyPlaybackTempo() {
+  const input = $('playbackBpm');
+  const tempo = input.value && input.checkValidity() ? Number(input.value) : bpm;
+  audio.preservesPitch = true;
+  audio.defaultPlaybackRate = audio.playbackRate = tempo / bpm;
+  updatePlayhead();
+}
+$('playbackBpm').addEventListener('input', () => {
+  if ($('playbackBpm').checkValidity()) applyPlaybackTempo();
+});
+$('playbackBpm').addEventListener('change', () => {
+  if (!$('playbackBpm').checkValidity()) {
+    $('playbackBpm').reportValidity();
+    return;
+  }
+  applyPlaybackTempo();
+  const tempo = Number($('playbackBpm').value) || bpm;
+  setStatus(`Playback at ${tempo.toFixed(1)} BPM. Transcription stays at ${bpm.toFixed(1)} BPM.`);
+});
+
 async function generatePlayback(play = false) {
   setStatus('Creating playback from the note sheet…');
   const result = await request(`/playback/${projectId}?mix_ratio=${$('playbackMix').value}`, {
@@ -680,6 +703,7 @@ async function generatePlayback(play = false) {
   setStatus('Playback ready. Click the sheet or use the playback slider to move through it.');
 }
 audio.addEventListener('loadedmetadata', () => {
+  applyPlaybackTempo();
   audio.currentTime = Math.min(pendingSeek, audio.duration || 0);
   if (waitingToPlay) {
     waitingToPlay = false;
@@ -778,29 +802,19 @@ $('detectTempoBtn').addEventListener('click', () =>
 );
 $('applyTimingBtn').addEventListener('click', () =>
   action(async () => {
-    const target = Number($('targetBpm').value);
-    if (!target || !$('targetBpm').checkValidity())
-      throw new Error('Choose a target tempo from 20 to 300 BPM.');
-    bpmOverride = bpmOverride || Math.abs(target - bpm) > 0.05;
     await request(`/timing/${projectId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        bpm: target,
+        bpm,
         automatic: $('automaticRhythm').checked,
         subdivisions: Number($('gridInput').value),
         beats_per_measure: Number($('fitBeats').value),
         recognize_patterns: $('recognizePatterns').checked,
-        intended_spacing: $('intendedSpacing').value,
-        consistent_lengths: $('consistentLengths').checked,
       }),
     });
     await fetchTracks();
-    setStatus(
-      rhythm
-        ? 'Rhythm fitted with consistent spacing. Playback and downloads use the fitted sheet.'
-        : 'Performed timing restored.',
-    );
+    setStatus(rhythm ? 'Timing tidied to the selected grid.' : 'Performed timing restored.');
   }),
 );
 function updateRhythmSummary() {

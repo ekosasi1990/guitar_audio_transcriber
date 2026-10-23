@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import io
 import math
+import numpy as np
 import librosa
 import soundfile as sf
 from copy import deepcopy
@@ -12,7 +13,7 @@ from typing import Dict, Literal
 from fastapi import FastAPI, File, HTTPException, UploadFile, Form, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .audio_processing.quantization import fit_rhythm, auto_fit_rhythm
+from .audio_processing.quantization import fit_rhythm, auto_fit_rhythm, group_events
 from .audio_processing.tempo_estimation import estimate_note_tempo, repeated_pattern
 from .audio_processing.playing_confirmation import confirm_playing
 
@@ -56,13 +57,6 @@ RECORDINGS_DIR = os.path.join(REPO_ROOT, "recordings")
 PROJECTS: Dict[str, dict] = {}
 
 
-def _get_project(project_id):
-    try:
-        return PROJECTS[project_id]
-    except KeyError:
-        raise HTTPException(404, "Project not found") from None
-
-
 @app.post("/upload")
 async def upload_audio(file: UploadFile = File(...)):
     project_id = str(uuid.uuid4())
@@ -100,10 +94,10 @@ async def transcribe(
     beats_per_measure: int = Query(4, ge=1, le=12),
     recognize_patterns: bool = True,
     string_set: Literal["all", "top", "bottom"] = "all",
-    intended_spacing: Literal["auto", "sixteenth", "eighth", "quarter"] = "auto",
-    consistent_lengths: bool = True,
 ):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     if subdivisions not in (2, 4, 8):
         raise HTTPException(
             422, "Timing grid must be 2, 4, or 8 subdivisions per beat."
@@ -143,8 +137,6 @@ async def transcribe(
                 subdivisions=subdivisions,
                 beats_per_measure=beats_per_measure,
                 recognize_patterns=recognize_patterns,
-                intended_spacing=intended_spacing,
-                consistent_lengths=consistent_lengths,
             ),
         )
 
@@ -209,7 +201,9 @@ async def live_notes(
 
 @app.get("/tempo/{project_id}")
 async def detected_tempo(project_id: str):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     if "detected_bpm" in project:
         return {
             "bpm": project["detected_bpm"],
@@ -232,8 +226,6 @@ def _apply_automatic(project, settings):
             settings.subdivisions,
             settings.beats_per_measure,
             settings.recognize_patterns,
-            settings.intended_spacing,
-            settings.consistent_lengths,
         )
         if settings.automatic
         else deepcopy(source)
@@ -245,11 +237,9 @@ def _apply_automatic(project, settings):
             "mode": "auto",
             "beats_per_measure": settings.beats_per_measure,
             "subdivisions": settings.subdivisions,
-            "intended_spacing": settings.intended_spacing,
-            "consistent_lengths": settings.consistent_lengths,
             "pattern": (
                 repeated_pattern(source, settings.beats_per_measure)
-                if settings.recognize_patterns and settings.intended_spacing == "auto"
+                if settings.recognize_patterns
                 else None
             ),
             "measures": max(
@@ -274,14 +264,17 @@ def _apply_automatic(project, settings):
 
 @app.post("/timing/{project_id}")
 async def timing(project_id: str, settings: TimingSettings):
-    project = _get_project(project_id)
-    _apply_automatic(project, settings)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _apply_automatic(PROJECTS[project_id], settings)
     return await get_tracks(project_id)
 
 
 @app.post("/tempo/{project_id}")
 async def change_tempo(project_id: str, settings: TempoChange):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     ratio = project["bpm"] / settings.bpm
     for notes in project["tracks"].values():
         for n in notes:
@@ -304,12 +297,7 @@ async def save_recording(file: UploadFile = File(...), name: str = Form("")):
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
     extension = os.path.splitext(file.filename or "take.wav")[1].lower()
     if extension not in (".wav", ".mp3"):
-        raise HTTPException(422, "Recordings must be WAV or MP3 audio.")
-    data = await file.read()
-    try:
-        sf.info(io.BytesIO(data))
-    except Exception as exc:
-        raise HTTPException(422, "The recording could not be read as audio.") from exc
+        raise HTTPException(422, "Choose WAV or MP3 audio to save.")
     base = (
         os.path.basename(name)
         if name
@@ -318,38 +306,37 @@ async def save_recording(file: UploadFile = File(...), name: str = Form("")):
     if not base.lower().endswith(extension):
         base += extension
     path = os.path.join(RECORDINGS_DIR, base)
-    # Preserve previous takes even when the caller requests an existing name.
-    try:
-        with open(path, "xb") as f:
-            f.write(data)
-    except FileExistsError:
+    if os.path.exists(path):
         stem, extension = os.path.splitext(base)
         base = f"{stem}-{uuid.uuid4().hex[:8]}{extension}"
         path = os.path.join(RECORDINGS_DIR, base)
-        with open(path, "xb") as f:
-            f.write(data)
+    with open(path, "xb") as f:
+        shutil.copyfileobj(file.file, f)
     return {"path": path, "filename": base}
 
 
 @app.get("/tracks/{project_id}")
 async def get_tracks(project_id: str):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
     return {
-        "bpm": project["bpm"],
-        "tracks": project["tracks"],
-        "rhythm": project.get("rhythm"),
-        "can_undo_rhythm": "rhythm_undo" in project,
+        "bpm": PROJECTS[project_id]["bpm"],
+        "tracks": PROJECTS[project_id]["tracks"],
+        "rhythm": PROJECTS[project_id].get("rhythm"),
+        "can_undo_rhythm": "rhythm_undo" in PROJECTS[project_id],
         "tablature": tablature_events(
-            project["tracks"].get("Guitar", []),
-            project.get("string_set", "all"),
+            PROJECTS[project_id]["tracks"].get("Guitar", []),
+            PROJECTS[project_id].get("string_set", "all"),
         ),
-        "timing_changed": project.get("timing_changed", False),
+        "timing_changed": PROJECTS[project_id].get("timing_changed", False),
     }
 
 
 @app.post("/rhythm/{project_id}")
 async def apply_rhythm(project_id: str, settings: RhythmFit):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     if set(project["tracks"]) != {"Guitar"}:
         raise HTTPException(422, "Fit the guitar rhythm before adding accompaniment.")
     try:
@@ -367,7 +354,9 @@ async def apply_rhythm(project_id: str, settings: RhythmFit):
 
 @app.post("/rhythm/{project_id}/undo")
 async def undo_rhythm(project_id: str):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     previous = project.pop("rhythm_undo", None)
     if previous is None:
         raise HTTPException(422, "No rhythm fit to undo.")
@@ -377,8 +366,9 @@ async def undo_rhythm(project_id: str):
 
 @app.post("/edit/{project_id}")
 async def edit_note(project_id: str, edit: NoteEdit):
-    project = _get_project(project_id)
-    tracks = project["tracks"]
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    tracks = PROJECTS[project_id]["tracks"]
     if edit.track not in tracks:
         raise HTTPException(status_code=404, detail="Track not found")
 
@@ -390,26 +380,29 @@ async def edit_note(project_id: str, edit: NoteEdit):
             n["velocity"] = edit.new_velocity
             n.pop("beat_duration", None)
             break
-    project.pop("rhythm_undo", None)
-    project["performed_notes"] = deepcopy(tracks.get("Guitar", []))
+    PROJECTS[project_id].pop("rhythm_undo", None)
+    PROJECTS[project_id]["performed_notes"] = deepcopy(tracks.get("Guitar", []))
     return {"status": "updated", "tracks": tracks}
 
 
 @app.post("/accompaniment/{project_id}")
 async def add_accompaniment(project_id: str, req: AccompanimentRequest):
-    project = _get_project(project_id)
-    bpm = project["bpm"]
-    duration = len(project["y"]) / project["sr"]
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    bpm = PROJECTS[project_id]["bpm"]
+    duration = len(PROJECTS[project_id]["y"]) / PROJECTS[project_id]["sr"]
     accompaniment = generate_accompaniment(req.chords, bpm, duration)
-    project["accompaniment"] = accompaniment
-    project["tracks"].update(accompaniment)
-    project.pop("rhythm_undo", None)
-    return {"status": "ok", "tracks": project["tracks"]}
+    PROJECTS[project_id]["accompaniment"] = accompaniment
+    PROJECTS[project_id]["tracks"].update(accompaniment)
+    PROJECTS[project_id].pop("rhythm_undo", None)
+    return {"status": "ok", "tracks": PROJECTS[project_id]["tracks"]}
 
 
 @app.post("/export/{project_id}")
 async def export_midi_endpoint(project_id: str, filename: str = "export.mid"):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     safe_name = os.path.basename(filename)
     output_path = os.path.join(OUTPUT_DIR, f"{project_id}_{safe_name}")
     instruments = {"Guitar": 25}
@@ -421,7 +414,9 @@ async def export_midi_endpoint(project_id: str, filename: str = "export.mid"):
 async def generate_sheet(
     project_id: str, format: str = "musicxml", download: bool = False
 ):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     if format == "musicxml":
         path = os.path.join(OUTPUT_DIR, f"{project_id}_sheet.xml")
         notes_to_musicxml(
@@ -451,7 +446,9 @@ async def generate_sheet(
 
 @app.post("/playback/{project_id}")
 async def generate_playback(project_id: str, mix_ratio: float = Query(1.0, ge=0, le=1)):
-    project = _get_project(project_id)
+    if project_id not in PROJECTS:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = PROJECTS[project_id]
     if (project.get("rhythm") or project.get("timing_changed")) and mix_ratio < 1:
         raise HTTPException(
             422,

@@ -12,7 +12,10 @@ from tests.conftest import MELODY_EVENTS, synth_pluck, SR
 EXPECTED = sum(([bass, bass, 55, 55, 54, 54, 55, 55] for bass in (43, 45, 48, 57)), [])
 
 
-@pytest.mark.parametrize("take", ["smooth", "rough"])
+@pytest.mark.parametrize(
+    "take",
+    ["smooth", "rough", "take-20261014-124828-940576", "take-20261014-124519-686597"],
+)
 @pytest.mark.parametrize("gain", [1.0, 0.1])
 def test_recorded_sequence(take, gain):
     path = Path(__file__).resolve().parents[1] / "recordings" / f"{take}.wav"
@@ -39,6 +42,21 @@ def test_repeated_plucks(replucks_wav):
     notes = transcribe_melody(y, sr)
     assert [n["pitch"] for n in notes] == [64, 64]
     assert abs(notes[1]["start"] - 0.8) < 0.1
+
+
+@pytest.mark.parametrize("gain", [1.0, 0.1])
+def test_residual_low_string_does_not_add_an_attack(gain):
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "recordings/take-20261014-114952-947866.wav"
+    )
+    if not path.exists():
+        pytest.skip("Local eight-note regression recording missing")
+    y, sr = load_audio(str(path))
+    notes = transcribe_melody(y * gain, sr)
+    assert [n["pitch"] for n in notes] == [43, 43, 55, 55, 54, 54, 55, 55]
+    expected_starts = [0.04, 0.69, 1.24, 1.85, 2.43, 2.94, 3.56, 4.17]
+    assert [n["start"] for n in notes] == pytest.approx(expected_starts, abs=0.04)
 
 
 def test_silence():

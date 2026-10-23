@@ -108,6 +108,16 @@
         <div class="transport">
           <button id="playBtn" class="primary" disabled>Play</button
           ><button id="stopPlaybackBtn" disabled>Back to start</button
+          ><label class="playback-tempo" for="playbackBpm"
+            >Playback BPM<input
+              id="playbackBpm"
+              type="number"
+              min="20"
+              max="300"
+              step="0.1"
+              placeholder="120"
+              title="Leave blank to use the transcription tempo. Changes playback speed without changing notes or exports."
+              disabled /></label
           ><label class="seek-label" for="seekInput"
             >Playback position<input
               id="seekInput"
@@ -181,18 +191,8 @@
               ><label class="check"
                 ><input id="recognizePatterns" type="checkbox" checked />Keep repeated groups in
                 bars</label
-              ><label for="intendedSpacing"
-                >Intended spacing<select id="intendedSpacing">
-                  <option value="auto">Infer recurring rhythm</option>
-                  <option value="sixteenth">Even sixteenths · 4 per beat</option>
-                  <option value="eighth">Even eighths · 2 per beat</option>
-                  <option value="quarter">Even quarters · 1 per beat</option>
-                </select></label
-              ><label class="check"
-                ><input id="consistentLengths" type="checkbox" checked />Consistent repeated-note
-                lengths</label
               ><label for="gridInput"
-                >Grid resolution<select id="gridInput">
+                >Timing grid<select id="gridInput">
                   <option value="2">Eighth notes</option>
                   <option value="4" selected>Sixteenth notes</option>
                   <option value="8">Thirty-second notes</option>
@@ -208,12 +208,10 @@
               ><button id="undoRhythmBtn" disabled>Undo timing change</button>
             </div>
             <p class="hint">
-              Infer recurring rhythm groups similar gaps and fits them to consistent beat lengths,
-              retaining clear pauses. Grid resolution allows sixteenth notes; it does not make every
-              note a sixteenth. Choose Even sixteenths when you intend four notes per beat, then
-              Apply timing settings. Repeated notes of the same beat length share a sounding length.
-              Turn that off to keep articulation differences. BPM sets beat speed; changing it
-              afterwards preserves positions in bars.
+              Automatic timing snaps attacks to the BPM grid, keeping pauses and different rhythms.
+              Consistent groups of four repeated attacks can fit four beats in a bar; disable
+              repeated groups if that interpretation is wrong. Set BPM before transcription to
+              control that grid; changing BPM afterwards changes playback speed.
             </p>
             <details class="nested">
               <summary>Assign an intended rhythm manually</summary>

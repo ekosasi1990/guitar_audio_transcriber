@@ -1,5 +1,4 @@
 import math
-from statistics import median
 
 
 def group_events(notes, tolerance=0.06):
@@ -12,71 +11,12 @@ def group_events(notes, tolerance=0.06):
     return groups
 
 
-def _consistent_lengths(notes, bpm):
-    """Use a shared articulation for repeated voicings of the same beat length."""
-    groups = group_events(notes)
-    gates = {}
-    for group in groups:
-        n = group[0]
-        key = (tuple(sorted(n["pitch"] for n in group)), n["beat_duration"])
-        gate = (n["end"] - n["start"]) / (n["beat_duration"] * 60 / bpm)
-        gates.setdefault(key, []).append(gate)
-    out = []
-    for group in groups:
-        n = group[0]
-        key = (tuple(sorted(n["pitch"] for n in group)), n["beat_duration"])
-        gate = min(1, max(0.15, median(gates[key])))
-        for member in group:
-            out.append(
-                {
-                    **member,
-                    "end": member["start"] + n["beat_duration"] * 60 / bpm * gate,
-                }
-            )
-    return out
-
-
-def _interval_slots(gaps, step, intended_spacing):
-    """Cluster recurring gaps before assigning durations; accumulate musical slots.
-
-    Similar gaps share a duration instead of straddling different rounding
-    thresholds. Clearly longer gaps retain their separate rhythm/rest slots.
-    """
-    if not gaps:
-        return []
-    if intended_spacing != "auto":
-        typical = median(gaps)
-        return [
-            max(1, round(gap / typical)) if gap >= typical * 1.8 else 1 for gap in gaps
-        ]
-    clusters = []
-    for i, gap in sorted(enumerate(gaps), key=lambda item: item[1]):
-        if clusters and gap / clusters[-1][0][1] <= 1.65:
-            clusters[-1].append((i, gap))
-        else:
-            clusters.append([(i, gap)])
-    slots = [1] * len(gaps)
-    for cluster in clusters:
-        duration = median(gap for _, gap in cluster)
-        for i, gap in cluster:
-            # Isolated intervals still round independently; recurring values
-            # provide stronger evidence of the player's intended rhythm.
-            slots[i] = max(1, round((duration if len(cluster) >= 2 else gap) / step))
-    return slots
-
-
 def auto_fit_rhythm(
-    notes,
-    bpm,
-    subdivisions=4,
-    beats_per_measure=4,
-    recognize_patterns=True,
-    intended_spacing="auto",
-    consistent_lengths=True,
+    notes, bpm, subdivisions=4, beats_per_measure=4, recognize_patterns=True
 ):
     """Snap performed events to a fixed beat grid, retaining rests and chord stacks."""
     groups = group_events(notes)
-    if recognize_patterns and intended_spacing == "auto":
+    if recognize_patterns:
         from .tempo_estimation import repeated_pattern
 
         pattern = repeated_pattern(notes, beats_per_measure)
@@ -103,54 +43,33 @@ def auto_fit_rhythm(
                             "beat_duration": 1.0,
                         }
                     )
-            return _consistent_lengths(out, bpm) if consistent_lengths else out
-    units = {"sixteenth": 0.25, "eighth": 0.5, "quarter": 1}
-    step = 60 / bpm * units.get(intended_spacing, 1 / subdivisions)
-    gaps = [b[0]["start"] - a[0]["start"] for a, b in zip(groups, groups[1:])]
-    spacing = _interval_slots(gaps, step, intended_spacing)
-    repeated_lengths = {}
-    if consistent_lengths:
-        voicings = [tuple(sorted(n["pitch"] for n in group)) for group in groups]
-        begin = 0
-        for i in range(1, len(groups) + 1):
-            if i == len(groups) or voicings[i] != voicings[begin]:
-                if i - begin >= 2:
-                    length = max(1, round(median(spacing[begin : i - 1])))
-                    repeated_lengths.update({j: length for j in range(begin, i)})
-                begin = i
-    out = []
-    cursor = round(groups[0][0]["start"] / step) * step if groups else 0
+            return out
+    step = 60 / bpm / subdivisions
+    out, previous_start = [], -step
     for i, group in enumerate(groups):
         source_start = min(n["start"] for n in group)
-        start = cursor
+        start = max(round(source_start / step) * step, previous_start + step)
         original_end = max(n["end"] for n in group)
         next_start = groups[i + 1][0]["start"] if i + 1 < len(groups) else original_end
         sounding = max(0.01, min(original_end, next_start) - source_start)
-        slots = (
-            spacing[i]
-            if i < len(spacing)
-            else (spacing[-1] if spacing else max(1, round(sounding / step)))
-        )
-        slots = repeated_lengths.get(i, slots)
-        span = max(0.01, gaps[i] if i < len(gaps) else gaps[-1] if gaps else sounding)
-        gate = min(1, max(0.1, sounding / span))
-        end = start + slots * step * gate
-        # A clear release well before a long gap indicates a rest, not a
-        # note held for the entire gap. Keep the following attack position.
-        if i not in repeated_lengths and slots > 1 and sounding < span * 0.55:
-            slots = max(1, round(sounding / step))
-            end = start + min(sounding, slots * step)
+        span = max(step, next_start - source_start)
+        slots = max(1, round(min(span, sounding / 0.65) / step))
+        end = start + min(sounding, slots * step)
+        if i + 1 < len(groups):
+            next_grid = max(round(next_start / step) * step, start + step)
+            end = min(end, next_grid)
+            slots = min(slots, max(1, round((next_grid - start) / step)))
         for note in group:
             out.append(
                 {
                     **note,
                     "start": round(start, 6),
                     "end": round(max(start + 0.01, end), 6),
-                    "beat_duration": round(slots * step * bpm / 60, 8),
+                    "beat_duration": slots / subdivisions,
                 }
             )
-        cursor += (spacing[i] if i < len(spacing) else slots) * step
-    return _consistent_lengths(out, bpm) if consistent_lengths else out
+        previous_start = start
+    return out
 
 
 def fit_rhythm(

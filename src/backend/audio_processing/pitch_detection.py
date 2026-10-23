@@ -1,5 +1,6 @@
 import numpy as np
 import librosa
+from scipy.ndimage import median_filter
 
 
 def detect_pitches(y, sr, onsets, offsets):

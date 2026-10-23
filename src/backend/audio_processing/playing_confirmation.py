@@ -14,7 +14,7 @@ def confirm_playing(y, sr, notes):
     for group in group_events(notes):
         start = group[0]["start"]
         end = min(max(n["end"] for n in group), start + 0.65, len(y) / sr)
-        if end - start < 0.07:
+        if end - start < 0.055:
             continue
         body = y[int((start + 0.01) * sr) : int(end * sr)]
         if len(body) < 1024:
@@ -27,7 +27,8 @@ def confirm_playing(y, sr, notes):
         )
         active = rms > max(float(rms.max()) * 0.18, 0.0005)
         flatness = librosa.feature.spectral_flatness(S=spectrum)[0]
-        if np.sum(active) * 220 / sr < 0.025 or np.mean(flatness[active]) > 0.12:
+        coverage = (1024 + (np.sum(active) - 1) * 220) / sr if active.any() else 0
+        if coverage < 0.025 or np.mean(flatness[active]) > 0.12:
             continue
         # A stable fundamental excludes speech glides and broadband handling
         # sounds. Chord spectra instead need sustained harmonic concentration.
@@ -67,6 +68,7 @@ def confirm_playing(y, sr, notes):
             dict(
                 start=start,
                 end=end,
+                rms=after,
                 short=end - start < 0.16,
                 held=end - start >= 0.4
                 and after > before * 2.5
@@ -78,7 +80,13 @@ def confirm_playing(y, sr, notes):
         for a, b in zip(qualified, qualified[1:])
     )
     if repeated and all(n["short"] for n in qualified):
-        repeated = len(qualified) >= 3
+        clear_gap = False
+        for a, b in zip(qualified, qualified[1:]):
+            gap = y[int(a["end"] * sr) : int(b["start"] * sr)]
+            if len(gap) >= 0.008 * sr:
+                gap_rms = float(np.sqrt(np.mean(gap**2)))
+                clear_gap |= gap_rms < min(a["rms"], b["rms"]) * 0.2
+        repeated = len(qualified) >= 3 or clear_gap
     confirmed = repeated or any(n["held"] for n in qualified)
     return {
         "playing_confirmed": bool(confirmed),

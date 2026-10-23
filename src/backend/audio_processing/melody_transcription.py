@@ -15,8 +15,12 @@ def transcribe_melody(y, sr, noise_floor=0.3):
         fast_attacks,
         use_fast_windows,
         transcribe_fast_melody,
+        transcribe_separated_melody,
     )
 
+    separated = transcribe_separated_melody(y, sr, noise_floor)
+    if separated is not None:
+        return separated
     rapid_attacks = fast_attacks(y, sr, noise_floor)
     if use_fast_windows(rapid_attacks):
         return transcribe_fast_melody(y, sr, rapid_attacks)
@@ -42,12 +46,28 @@ def transcribe_melody(y, sr, noise_floor=0.3):
         wait=8,
     )
     spectrum = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop))
+    attack_hop = 64
+    attack_level = librosa.feature.rms(y=y, frame_length=256, hop_length=attack_hop)[0]
     pitches = np.arange(40, 89)
     bins = librosa.midi_to_hz(pitches)[:, None] * np.arange(1, 7) * n_fft / sr
     bins = bins.astype(int)
     candidates = []
     for frame in frames:
         start = max(0.0, frame * hop / sr - 0.03)
+        # Flux also peaks when a string is muted or its partials shift. A new
+        # pluck must have a local rise in energy, even over a ringing string.
+        first = max(0, int((start - 0.025) * sr / attack_hop))
+        last = min(len(attack_level), int((start + 0.16) * sr / attack_hop))
+        envelope = attack_level[first:last]
+        if len(envelope) < 4:
+            continue
+        rises = envelope[3:] - envelope[:-3]
+        rise = int(rises.argmax())
+        if (
+            rises[rise] < envelope.max() * 0.15
+            or envelope[rise + 3] < envelope[rise] * 1.25
+        ):
+            continue
         at = int(start * sr / hop)
         after = spectrum[:, at + 4 : at + 13]
         before = spectrum[:, max(0, at - 10) : max(1, at - 3)]
@@ -84,26 +104,20 @@ def transcribe_melody(y, sr, noise_floor=0.3):
         pitch = int(np.bincount(np.clip(rounded, 0, 127)).argmax())
         spectral_pitch = int(pitches[scores.argmax()])
         score = float(scores.max())
-        # A strong new upper fundamental may be masked by an old low string.
-        if score > 10 and spectral_pitch != pitch:
-            index = pitch - 40
-            if 0 <= index < len(pitches):
-                odd = values[index, ::2].sum()
-                total = values[index].sum()
-                if odd < total * 0.15 or abs(spectral_pitch - pitch) not in (
-                    12,
-                    19,
-                    24,
-                    28,
-                ):
-                    pitch = spectral_pitch
-        elif abs(spectral_pitch - pitch) > 1 and abs(spectral_pitch - pitch) not in (
-            12,
-            19,
-            24,
-            28,
-        ):
+        if not 40 <= pitch <= 88:
             continue
+        # Keep YIN's fundamental when its new odd partials support it. An
+        # octave with only even partials is usually the old ringing string.
+        index = pitch - 40
+        difference = abs(spectral_pitch - pitch)
+        if difference in (12, 24):
+            odd, total = values[index, ::2].sum(), values[index].sum()
+            if odd < total * 0.1 and score > scores[index] * 1.3:
+                pitch = spectral_pitch
+        elif difference > 1 and difference not in (19, 28):
+            if score <= scores[index] * 1.5:
+                continue
+            pitch = spectral_pitch
         clean_values = np.maximum.reduce(
             [
                 tonal_novelty[np.clip(bins + shift, 0, len(novelty) - 1)]
@@ -127,11 +141,14 @@ def transcribe_melody(y, sr, noise_floor=0.3):
     if not candidates:
         return []
     threshold = np.percentile([n["score"] for n in candidates], 90) * noise_floor
+    # Log harmonic scores can make quiet residual strings look like new plucks.
+    loudness_threshold = np.percentile([n["rms"] for n in candidates], 75) * noise_floor
     attacks = []
     for n in candidates:
         if (
             n["score"] < threshold
-            or n["clean_score"] < 3.2 * noise_floor / 0.3
+            or n["rms"] < loudness_threshold
+            or n["clean_score"] < n["score"] * noise_floor
             or n["novelty"] < 0.15
             or not 40 <= n["pitch"] <= 88
         ):

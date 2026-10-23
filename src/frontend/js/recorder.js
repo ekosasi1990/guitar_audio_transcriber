@@ -13,11 +13,13 @@ class MicRecorder {
   constructor() {
     this.audioCtx = null;
     this.source = null;
+    this.analyser = null;
     this.worklet = null;
     this.stream = null;
     this.chunks = [];
     this.sampleRate = 44100;
     this.isRecording = false;
+    this.startTime = 0;
     this.totalSamples = 0;
     this.currentRms = 0;
     this.peakRms = 0;
@@ -59,6 +61,8 @@ class MicRecorder {
     }
 
     this.source = this.audioCtx.createMediaStreamSource(this.stream);
+    this.analyser = this.audioCtx.createAnalyser();
+    this.analyser.fftSize = 256;
     this.worklet = new AudioWorkletNode(this.audioCtx, 'gat-pcm-capture');
     this.worklet.port.onmessage = (event) => {
       this.chunks.push(event.data);
@@ -76,11 +80,22 @@ class MicRecorder {
     const mute = this.audioCtx.createGain();
     mute.gain.value = 0;
 
+    this.source.connect(this.analyser);
     this.source.connect(this.worklet);
     this.worklet.connect(mute);
     mute.connect(this.audioCtx.destination);
 
     this.isRecording = true;
+    this.startTime = Date.now();
+  }
+
+  getLevel() {
+    if (!this.analyser) return 0;
+    const data = new Uint8Array(this.analyser.frequencyBinCount);
+    this.analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    return sum / data.length / 255;
   }
 
   getDuration() {
@@ -140,6 +155,7 @@ class MicRecorder {
     if (this.source) {
       this.source.disconnect();
       this.source = null;
+      this.analyser = null;
     }
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());

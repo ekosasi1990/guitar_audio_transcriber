@@ -210,6 +210,12 @@ canvas {
   padding: 12px;
   border-top: 1px solid var(--line);
 }
+.playback-tempo {
+  font-size: 12px;
+}
+.playback-tempo input {
+  width: 85px;
+}
 .seek-label {
   flex: 1;
   min-width: 130px;

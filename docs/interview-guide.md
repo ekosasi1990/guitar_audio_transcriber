@@ -50,16 +50,16 @@ the underlying YIN algorithm.
 | 0:00–0:45 | Give the pitch. | Personal need and the intended user. |
 | 0:45–1:30 | Open Smooth in single-note mode. | Audio becomes 32 editable attacks, rather than a picture of a waveform. |
 | 1:30–2:15 | Play the original under Advanced, then the transcription. | The original recording and synthesized note data are different representations. |
-| 2:15–3:00 | Choose Even sixteenths and Apply timing settings. | Intent can be ambiguous; users can tell the app the rhythm they meant. Four attacks per beat means 16 per 4/4 bar. |
-| 3:00–3:30 | Change BPM and seek by clicking the sheet. | Tempo changes playback speed while preserving beat positions. |
+| 2:15–3:00 | Open Assign an intended rhythm manually; set 2 bars and 16 attacks per bar. | Intent can be ambiguous; users can tell the app the rhythm they meant. Four attacks per beat means 16 per 4/4 bar. |
+| 3:00–3:30 | Change Playback BPM below the sheet and seek by clicking the sheet. | Listening speed changes without changing the transcription or exported notes. Clear the field to restore the transcription tempo. |
 | 3:30–4:15 | Open Mitski in chord mode, with automatic spacing. | This sample contains 64 chord attacks and 128 individual pitches. Each chord shares timing. |
 | 4:15–5:00 | Export MIDI or MusicXML, then summarize limits. | The output works outside the app. Explain what still needs broader validation. |
 
-For Mitski, restore Intended spacing to Infer recurring rhythm before opening
-it. If you previously entered a target BPM, use Detect tempo. The four-attacks-
-per-bar interpretation is about 201.4 BPM; half that BPM corresponds to twice
-as many attacks per bar. This is a beat interpretation, not two different
-performances.
+For Mitski, select Chords and Bottom 3 strings before opening the recording.
+If you previously entered a target BPM, use Detect tempo. The same performed
+spacing can be interpreted as quarter notes or eighth notes; halving the BPM
+places twice as many attacks in each bar. This is a beat interpretation, not
+two different performances.
 
 Use recorded inputs as the main demo. A short live take is optional after
 checking the actual microphone. Do not make the interview depend on recording
@@ -94,9 +94,9 @@ walkthrough, open these in order:
 2. `src/backend/api.py`: upload and transcription endpoints.
 3. `src/backend/audio_processing/transcription.py`: detector selection.
 4. `src/backend/audio_processing/melody_transcription.py`: new attacks versus sustain.
-5. `src/backend/audio_processing/quantization.py`: intended rhythm and repeated lengths.
+5. `src/backend/audio_processing/quantization.py`: grid snapping and manually assigned rhythm.
 6. `src/backend/sheet_music/fingering.py`: playable tab assignment.
-7. `tests/test_rhythm_intent.py`: a regression case with uneven sixteenths.
+7. `tests/test_melody_generalization.py`: unrelated pitches, uneven playing, and changed key/speed.
 
 You do not need to explain every constant. Explain the evidence each stage
 uses and why the stages are separate.
@@ -164,12 +164,11 @@ needs to avoid treating one note's harmonics as additional notes.
 
 ### What was a concrete failure and how was it addressed?
 
-Use one example: uneven sixteenth-note pairs landed in different grid slots
-and had different lengths. Independent onset rounding preserved the mistake.
-The revised rhythm code groups recurring gaps, accumulates musical slots,
-and normalizes repeated lengths. Explicit spacing is available because intent
-cannot always be inferred. The regression tests preserve pitch order and
-event count while checking the corrected timing.
+Use one example: a ringing string can be mistaken for another note or obscure
+an intentional second pluck. The detector looks for new attack and harmonic
+energy rather than relying only on pitch being present. Regression recordings
+check pitch order and attack counts. Timing correction is a separate operation;
+the current version uses grid snapping or a manually specified rhythm.
 
 Another example is live snapshots retaining incorrect pitch guesses. The
 preview now replaces a reliable overlapping region and waits for more audio
@@ -187,11 +186,11 @@ labeled performances, precision/recall, timing error, and several guitars.
 ### How does quantization work?
 
 At 120 BPM, a quarter beat lasts 0.5 seconds and a sixteenth lasts 0.125.
-Similar observed gaps are treated as evidence for the same rhythmic duration.
-Those durations are assigned to the selected beat grid and accumulated, so
-small performance errors do not keep shifting later notes. Clear long gaps
-remain. Explicit even spacing supplies the user's intent when inference is
-wrong. Swing, triplets, and arbitrary rubato are not supported.
+Detected starts are rounded to the selected grid, with separate attacks kept
+in separate slots. Clear pauses remain. The manual fitter can instead assign
+attacks in order to an explicitly chosen number of bars and slots per bar.
+That is a user-supplied rhythm, not guaranteed intent recognition. Swing,
+triplets, and arbitrary rubato are not supported.
 
 ### How do you turn a pitch into a fret?
 

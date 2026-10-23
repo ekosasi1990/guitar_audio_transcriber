@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def chord_to_midi(chord_name):
     """Very simple mapping from chord name to a set of MIDI pitches."""
     base = {

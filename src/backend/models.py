@@ -33,8 +33,6 @@ class TimingSettings(BaseModel):
     subdivisions: Literal[2, 4, 8] = 4
     beats_per_measure: int = Field(4, ge=1, le=12)
     recognize_patterns: bool = True
-    intended_spacing: Literal["auto", "sixteenth", "eighth", "quarter"] = "auto"
-    consistent_lengths: bool = True
 
 
 class TempoChange(BaseModel):

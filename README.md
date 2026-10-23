@@ -51,21 +51,27 @@ pydub compatibility, installed by the requirements file.
 5. Play the result or download MIDI, sheet music, or tablature. MusicXML files
    open in a notation editor; the app displays its own tab and note timeline.
 
-Save recording locally writes to this project's `recordings/` folder. Imported
-files keep their original format; microphone takes are WAV. Existing files
-are not overwritten, and personal recordings are excluded from Git.
+Playback BPM below the sheet changes listening speed while keeping the pitch,
+transcription, and exports unchanged. For example, transcribe at 80 BPM and set
+Playback BPM to 180. Clear Playback BPM to listen at the transcription tempo.
+
+Save recording locally saves microphone takes and opened audio files in
+this project's `recordings/` folder. It preserves the original audio format
+and gives duplicate filenames a unique suffix. Personal recordings are excluded
+from Git.
 
 ## Rhythm settings
 
-Automatic fitting groups similar gaps and assigns consistent beat lengths.
-Repeated notes can share their length instead of retaining uneven releases.
-Clear pauses remain. Four-attack chord blocks can fit four quarter beats per
-bar when repeated groups provide enough evidence.
+Automatic timing snaps each detected attack to the BPM grid while retaining
+performed sounding lengths and clear pauses. Repeated groups of four can be
+assigned one quarter-note attack per beat when enough evidence is present.
+The recurring-gap clustering and repeated-length normalization have been
+reverted.
 
 A sixteenth-note grid allows sixteenth-note positions; it does not mean every
-note is a sixteenth. For four attacks per beat, choose **Advanced → Intended
-spacing → Even sixteenths → Apply timing settings**. Eighth and quarter spacing
-are also available. Turn off consistent lengths to keep articulation differences.
+note is a sixteenth. The earlier manual rhythm tool remains under Advanced:
+set bars and attacks per bar, or specify beat lengths. The count must match
+the detected attacks. A chord counts as one attack.
 
 Undo restores the previous timing operation. Disabling automatic timing
 restores performed notes. Changing BPM changes playback speed, preserving beat
